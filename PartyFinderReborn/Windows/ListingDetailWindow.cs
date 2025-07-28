@@ -39,7 +39,6 @@ public class ListingDetailWindow : Window, IDisposable
     private string EditPfCode;
     private string NewTag;
     private string NewStrategy;
-    private string NewRequiredClear;
     private string NewRequiredPlugin;
     private List<PopularItem> PopularTags;
     
@@ -91,7 +90,6 @@ public class ListingDetailWindow : Window, IDisposable
         EditPfCode = listing.PfCode;
         NewTag = "";
         NewStrategy = "";
-        NewRequiredClear = "";
         NewRequiredPlugin = "";
         PopularTags = new List<PopularItem>();
         
@@ -360,10 +358,11 @@ public class ListingDetailWindow : Window, IDisposable
         ImGui.InputText("##progpoint", ref EditProgPoint, 200);
         
         // Required Clears
-        ImGui.Text("Required Clears (Duty IDs)");
+        ImGui.Text("Required Clears");
         for (int i = EditRequiredClears.Count - 1; i >= 0; i--)
         {
-            ImGui.Text($"• Duty #{EditRequiredClears[i]}");
+            var dutyName = Plugin.ContentFinderService.GetDutyDisplayName(EditRequiredClears[i]);
+            ImGui.Text($"• {dutyName}");
             ImGui.SameLine();
             if (ImGui.SmallButton($"Remove##clear{i}"))
             {
@@ -371,15 +370,9 @@ public class ListingDetailWindow : Window, IDisposable
             }
         }
         
-        ImGui.InputText("Add Required Clear (ID)", ref NewRequiredClear, 10);
-        ImGui.SameLine();
-        if (ImGui.Button("Add Clear") && !string.IsNullOrWhiteSpace(NewRequiredClear) && uint.TryParse(NewRequiredClear, out var clearId))
+        if (ImGui.Button("Add Required Clear"))
         {
-            if (!EditRequiredClears.Contains(clearId))
-            {
-                EditRequiredClears.Add(clearId);
-            }
-            NewRequiredClear = "";
+            DutySelectorModal.Open(null, OnRequiredClearSelected);
         }
         
         // Required Plugins
@@ -612,6 +605,14 @@ public class ListingDetailWindow : Window, IDisposable
     {
         SelectedDuty = selectedDuty;
         EditCfcId = selectedDuty?.RowId ?? 0;
+    }
+    
+    private void OnRequiredClearSelected(ContentFinderCondition? selectedDuty)
+    {
+        if (selectedDuty.HasValue && !EditRequiredClears.Contains(selectedDuty.Value.RowId))
+        {
+            EditRequiredClears.Add(selectedDuty.Value.RowId);
+        }
     }
     
     private async Task SaveListingAsync()

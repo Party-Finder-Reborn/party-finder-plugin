@@ -134,7 +134,46 @@ public class PartyFinderApiService : IDisposable
         }
     }
     
+    // Additional methods for updating user progress
     
+    /// <summary>
+    /// Update completed duties on the server
+    /// </summary>
+    public async Task<bool> UpdateCompletedDutiesAsync(List<uint> completedDuties)
+    {
+        try
+        {
+            var json = JsonConvert.SerializeObject(new { completed_duties = completedDuties });
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            var response = await _httpClient.PutAsync($"{Constants.ApiBaseUrl}/api/auth/plugin/completed-duties/", content);
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Error updating completed duties: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Update seen progress points on the server
+    /// </summary>
+    public async Task<bool> UpdateSeenProgPointsAsync(Dictionary<string, List<uint>> seenProgPoints)
+    {
+        try
+        {
+            var json = JsonConvert.SerializeObject(new { seen_prog_points = seenProgPoints });
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            var response = await _httpClient.PutAsync($"{Constants.ApiBaseUrl}/api/auth/plugin/seen-prog-points/", content);
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Error updating seen progress points: {ex.Message}");
+            return false;
+        }
+    }
+
     /// <summary>
     /// Get popular tags
     /// </summary>

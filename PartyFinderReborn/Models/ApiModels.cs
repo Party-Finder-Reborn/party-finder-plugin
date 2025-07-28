@@ -28,7 +28,35 @@ public class UserProfile
     [JsonProperty("has_api_key")]
     public bool HasApiKey { get; set; }
     
+    [JsonProperty("completed_duties")]
+    public List<uint> CompletedDuties { get; set; } = new();
+    
+    [JsonProperty("seen_prog_points")]
+    public Dictionary<string, List<uint>> SeenProgPoints { get; set; } = new();
+    
     public string DisplayName => DiscordGlobalName ?? DiscordUsername ?? DiscordId;
+    
+    /// <summary>
+    /// Check if a duty has been completed
+    /// </summary>
+    public bool HasCompletedDuty(uint dutyId) => CompletedDuties.Contains(dutyId);
+    
+    /// <summary>
+    /// Get seen progress points for a specific duty
+    /// </summary>
+    public List<uint> GetSeenProgPoints(uint dutyId)
+    {
+        var key = dutyId.ToString();
+        return SeenProgPoints.TryGetValue(key, out var points) ? points : new List<uint>();
+    }
+    
+    /// <summary>
+    /// Check if a specific progress point has been seen for a duty
+    /// </summary>
+    public bool HasSeenProgPoint(uint dutyId, uint actionId)
+    {
+        return GetSeenProgPoints(dutyId).Contains(actionId);
+    }
 }
 
 
