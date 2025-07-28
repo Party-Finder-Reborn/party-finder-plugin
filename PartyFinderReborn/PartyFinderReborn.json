@@ -1,0 +1,21 @@
+{
+  "Author": "NostraThomas",
+  "Name": "Party Finder Reborn",
+  "Punchline": "A modern party matching system for Final Fantasy XIV",
+  "Description": "Connect with fellow Warriors of Light and find your perfect party composition with our modern, feature-rich party matching system. Seamlessly integrates with Discord and provides advanced matching algorithms.",
+  "InternalName": "PartyFinderReborn",
+  "ApplicableVersion": "any",
+  "Tags": [
+    "party",
+    "finder",
+    "matching",
+    "social",
+    "ui"
+  ],
+  "DalamudApiLevel": 12,
+  "LoadRequiredState": 0,
+  "LoadSync": false,
+  "CanUnloadAsync": true,
+  "LoadPriority": 0,
+  "Changelog": ""
+}
