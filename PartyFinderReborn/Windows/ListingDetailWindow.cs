@@ -7,6 +7,7 @@ using System.Linq;
 using System.Collections.Generic;
 using ECommons.DalamudServices;
 using System.Threading.Tasks;
+using Lumina.Excel.Sheets;
 
 namespace PartyFinderReborn.Windows;
 
@@ -19,24 +20,40 @@ public class ListingDetailWindow : Window, IDisposable
     private bool IsSaving;
     
     // Editable fields
-    private string EditName;
+    private uint EditCfcId;
     private string EditDescription;
     private string EditStatus;
-    private int EditMaxParticipants;
-    private DateTime EditEventDate;
     private List<string> EditUserTags;
     private List<string> EditUserStrategies;
+    private int EditMinItemLevel;
+    private int EditMaxItemLevel;
+    private List<uint> EditRequiredClears;
+    private string EditProgPoint;
+    private string EditExperienceLevel;
+    private List<string> EditRequiredPlugins;
+    private bool EditVoiceChatRequired;
+    private string EditLootRules;
+    private string EditParseRequirement;
+    private string EditDatacenter;
+    private string EditWorld;
+    private string EditPfCode;
     private string NewTag;
     private string NewStrategy;
+    private string NewRequiredClear;
+    private string NewRequiredPlugin;
     private List<PopularItem> PopularTags;
+    
+    // Duty selection state
+    private ContentFinderCondition? SelectedDuty;
+    private DutySelectorModal DutySelectorModal;
 
     public ListingDetailWindow(Plugin plugin, PartyListing listing, bool createMode = false) 
-        : base(createMode ? $"Create New Party Listing##create_{listing.Id}" : $"Party Listing: {listing.Name}##{listing.Id}")
+        : base(createMode ? $"Create New Party Listing##create_{listing.Id}" : $"Duty #{listing.CfcId}##{listing.Id}")
     {
         SizeConstraints = new WindowSizeConstraints
         {
-            MinimumSize = new Vector2(600, 500),
-            MaximumSize = new Vector2(1000, 800)
+            MinimumSize = new Vector2(700, 600),
+            MaximumSize = new Vector2(1200, 900)
         };
 
         Plugin = plugin;
@@ -46,16 +63,41 @@ public class ListingDetailWindow : Window, IDisposable
         IsSaving = false;
         
         // Initialize editable fields
-        EditName = listing.Name;
+        // For create mode with CfcId = 0, use the first valid CfcId
+        if (createMode && listing.CfcId == 0)
+        {
+            EditCfcId = Plugin.ContentFinderService.GetFirstValidCfcId();
+        }
+        else
+        {
+            EditCfcId = listing.CfcId;
+        }
+        
         EditDescription = listing.Description;
         EditStatus = listing.Status;
-        EditMaxParticipants = listing.MaxParticipants;
-        EditEventDate = listing.EventDate ?? DateTime.Now.AddHours(1);
         EditUserTags = new List<string>(listing.UserTags);
         EditUserStrategies = new List<string>(listing.UserStrategies);
+        EditMinItemLevel = listing.MinItemLevel;
+        EditMaxItemLevel = listing.MaxItemLevel;
+        EditRequiredClears = new List<uint>(listing.RequiredClears);
+        EditProgPoint = listing.ProgPoint;
+        EditExperienceLevel = listing.ExperienceLevel;
+        EditRequiredPlugins = new List<string>(listing.RequiredPlugins);
+        EditVoiceChatRequired = listing.VoiceChatRequired;
+        EditLootRules = listing.LootRules;
+        EditParseRequirement = listing.ParseRequirement;
+        EditDatacenter = listing.Datacenter;
+        EditWorld = listing.World;
+        EditPfCode = listing.PfCode;
         NewTag = "";
         NewStrategy = "";
+        NewRequiredClear = "";
+        NewRequiredPlugin = "";
         PopularTags = new List<PopularItem>();
+        
+        // Initialize duty selection state
+        SelectedDuty = Plugin.ContentFinderService.GetContentFinderCondition(EditCfcId);
+        DutySelectorModal = new DutySelectorModal(Plugin.ContentFinderService);
         
         // Load popular tags
         _ = LoadPopularTagsAsync();
@@ -107,18 +149,24 @@ public class ListingDetailWindow : Window, IDisposable
         
         ImGui.Separator();
         DrawActionButtons();
+        
+        // Draw the duty selector modal
+        DutySelectorModal.Draw();
     }
     
     private void DrawViewMode()
     {
         // Header with basic information
-        ImGui.Text($"Party Name: {Listing.Name}");
+        var dutyName = Plugin.ContentFinderService.GetDutyDisplayName(Listing.CfcId);
+        ImGui.Text($"Duty: {dutyName}");
+        ImGui.Text($"Content Finder ID: {Listing.CfcId}");
         ImGui.Text($"Status: {Listing.StatusDisplay}");
-        ImGui.Text($"Participants: {Listing.ParticipantsDisplay}");
+        ImGui.Text($"Experience Level: {Listing.ExperienceLevelDisplay}");
+        ImGui.Text($"Location: {Listing.LocationDisplay}");
         
-        if (Listing.EventDate.HasValue)
+        if (!string.IsNullOrEmpty(Listing.PfCode))
         {
-            ImGui.Text($"Event Date: {Listing.EventDateDisplay}");
+            ImGui.Text($"Party Finder Code: {Listing.PfCode}");
         }
 
         ImGui.Separator();
@@ -131,22 +179,47 @@ public class ListingDetailWindow : Window, IDisposable
             ImGui.Separator();
         }
 
-        // Venue Information
-        if (Listing.Venue != null)
+        // Requirements Section
+        ImGui.Text("Requirements:");
+        ImGui.Text(Listing.RequirementsDisplay);
+        
+        // Detailed Requirements
+        if (Listing.MinItemLevel > 0 || Listing.MaxItemLevel > 0)
         {
-            ImGui.Text("Venue Information:");
-            ImGui.Text($"Name: {Listing.Venue.Name}");
-            ImGui.Text($"Location: {Listing.VenueDisplay}");
-            if (!string.IsNullOrEmpty(Listing.Venue.Address))
-            {
-                ImGui.Text($"Address: {Listing.Venue.Address}");
-            }
-            if (Listing.Venue.Capacity.HasValue)
-            {
-                ImGui.Text($"Venue Capacity: {Listing.Venue.Capacity}");
-            }
-            ImGui.Separator();
+            if (Listing.MaxItemLevel > 0)
+                ImGui.Text($"• Item Level: {Listing.MinItemLevel} - {Listing.MaxItemLevel}");
+            else
+                ImGui.Text($"• Minimum Item Level: {Listing.MinItemLevel}");
         }
+        
+        if (!string.IsNullOrEmpty(Listing.ProgPoint))
+        {
+            ImGui.Text($"• Progression Point: {Listing.ProgPoint}");
+        }
+        
+        if (Listing.RequiredClears.Count > 0)
+        {
+            ImGui.Text($"• Required Clears: {string.Join(", ", Listing.RequiredClears.Select(c => $"#{c}"))}");
+        }
+        
+        if (Listing.RequiredPlugins.Count > 0)
+        {
+            ImGui.Text($"• Required Plugins: {string.Join(", ", Listing.RequiredPlugins)}");
+        }
+        
+        if (Listing.VoiceChatRequired)
+        {
+            ImGui.Text("• Voice Chat Required");
+        }
+        
+        ImGui.Text($"• Loot Rules: {Listing.LootRulesDisplay}");
+        
+        if (Listing.ParseRequirement != "none")
+        {
+            ImGui.Text($"• Parse Requirement: {Listing.ParseRequirementDisplay}");
+        }
+
+        ImGui.Separator();
 
         // Tags and Strategies
         if (Listing.UserTags.Count > 0)
@@ -181,17 +254,72 @@ public class ListingDetailWindow : Window, IDisposable
         ImGui.Text(IsCreateMode ? "Create New Party Listing" : "Edit Party Listing");
         ImGui.Separator();
         
-        // Name
-        ImGui.Text("Party Name *");
-        ImGui.InputText("##name", ref EditName, 100);
+        // Use tabs for different sections
+        if (ImGui.BeginTabBar("EditTabs"))
+        {
+            if (ImGui.BeginTabItem("Basic Info"))
+            {
+                DrawBasicInfoTab();
+                ImGui.EndTabItem();
+            }
+            
+            if (ImGui.BeginTabItem("Requirements"))
+            {
+                DrawRequirementsTab();
+                ImGui.EndTabItem();
+            }
+            
+            if (ImGui.BeginTabItem("Tags & Strategies"))
+            {
+                DrawTagsAndStrategiesTab();
+                ImGui.EndTabItem();
+            }
+            
+            ImGui.EndTabBar();
+        }
+    }
+    
+    private void DrawBasicInfoTab()
+    {
+        // Duty Selection
+        ImGui.Text("Select Duty *");
+        DrawDutySelector();
         
         // Description  
         ImGui.Text("Description");
         ImGui.InputTextMultiline("##description", ref EditDescription, 1000, new Vector2(-1, 100));
         
-        // Max Participants
-        ImGui.Text("Max Participants");
-        ImGui.SliderInt("##maxparticipants", ref EditMaxParticipants, 2, 24);
+        // Server Information
+        ImGui.Text("Datacenter *");
+        var datacenterItems = Datacenters.All.Values.ToArray();
+        var currentDatacenterIndex = Array.IndexOf(datacenterItems, Datacenters.All.GetValueOrDefault(EditDatacenter, EditDatacenter));
+        if (currentDatacenterIndex == -1) currentDatacenterIndex = 0;
+        
+        if (ImGui.Combo("##datacenter", ref currentDatacenterIndex, datacenterItems, datacenterItems.Length))
+        {
+            EditDatacenter = Datacenters.All.FirstOrDefault(kvp => kvp.Value == datacenterItems[currentDatacenterIndex]).Key;
+        }
+        
+        ImGui.Text("World *");
+        if (Datacenters.Worlds.TryGetValue(EditDatacenter, out var worlds))
+        {
+            var worldItems = worlds.ToArray();
+            var currentWorldIndex = Array.IndexOf(worldItems, EditWorld);
+            if (currentWorldIndex == -1) currentWorldIndex = 0;
+            
+            if (ImGui.Combo("##world", ref currentWorldIndex, worldItems, worldItems.Length))
+            {
+                EditWorld = worldItems[currentWorldIndex];
+            }
+        }
+        else
+        {
+            ImGui.InputText("##world", ref EditWorld, 50);
+        }
+        
+        // Party Finder Code
+        ImGui.Text("Party Finder Code (Optional)");
+        ImGui.InputText("##pfcode", ref EditPfCode, 10);
         
         // Status (only for existing listings)
         if (!IsCreateMode)
@@ -206,27 +334,111 @@ public class ListingDetailWindow : Window, IDisposable
                 EditStatus = PartyStatuses.All.FirstOrDefault(kvp => kvp.Value == statusItems[currentStatusIndex]).Key;
             }
         }
+    }
+    
+    private void DrawRequirementsTab()
+    {
+        // Experience Level
+        ImGui.Text("Experience Level");
+        var experienceLevels = new[] { "fresh", "some_exp", "experienced", "farm", "reclear" };
+        var experienceDisplays = new[] { "Fresh/Learning", "Some Experience", "Experienced", "Farm/Clear", "Weekly Reclear" };
+        var currentExpIndex = Array.IndexOf(experienceLevels, EditExperienceLevel);
+        if (currentExpIndex == -1) currentExpIndex = 0;
         
-        // Event Date
-        ImGui.Text("Event Date");
-        var eventDateStr = EditEventDate.ToString("yyyy-MM-dd HH:mm");
-        if (ImGui.InputText("##eventdate", ref eventDateStr, 20))
+        if (ImGui.Combo("##experience", ref currentExpIndex, experienceDisplays, experienceDisplays.Length))
         {
-            if (DateTime.TryParse(eventDateStr, out var newDate))
+            EditExperienceLevel = experienceLevels[currentExpIndex];
+        }
+        
+        // Item Level Requirements
+        ImGui.Text("Item Level Requirements");
+        ImGui.SliderInt("Min Item Level##minilvl", ref EditMinItemLevel, 0, 999);
+        ImGui.SliderInt("Max Item Level##maxilvl", ref EditMaxItemLevel, 0, 999);
+        
+        // Progression Point
+        ImGui.Text("Progression Point");
+        ImGui.InputText("##progpoint", ref EditProgPoint, 200);
+        
+        // Required Clears
+        ImGui.Text("Required Clears (Duty IDs)");
+        for (int i = EditRequiredClears.Count - 1; i >= 0; i--)
+        {
+            ImGui.Text($"• Duty #{EditRequiredClears[i]}");
+            ImGui.SameLine();
+            if (ImGui.SmallButton($"Remove##clear{i}"))
             {
-                EditEventDate = newDate;
+                EditRequiredClears.RemoveAt(i);
             }
         }
         
-        ImGui.Separator();
+        ImGui.InputText("Add Required Clear (ID)", ref NewRequiredClear, 10);
+        ImGui.SameLine();
+        if (ImGui.Button("Add Clear") && !string.IsNullOrWhiteSpace(NewRequiredClear) && uint.TryParse(NewRequiredClear, out var clearId))
+        {
+            if (!EditRequiredClears.Contains(clearId))
+            {
+                EditRequiredClears.Add(clearId);
+            }
+            NewRequiredClear = "";
+        }
         
+        // Required Plugins
+        ImGui.Text("Required Plugins");
+        for (int i = EditRequiredPlugins.Count - 1; i >= 0; i--)
+        {
+            ImGui.Text($"• {EditRequiredPlugins[i]}");
+            ImGui.SameLine();
+            if (ImGui.SmallButton($"Remove##plugin{i}"))
+            {
+                EditRequiredPlugins.RemoveAt(i);
+            }
+        }
+        
+        ImGui.InputText("Add Required Plugin", ref NewRequiredPlugin, 100);
+        ImGui.SameLine();
+        if (ImGui.Button("Add Plugin") && !string.IsNullOrWhiteSpace(NewRequiredPlugin) && !EditRequiredPlugins.Contains(NewRequiredPlugin))
+        {
+            EditRequiredPlugins.Add(NewRequiredPlugin.Trim());
+            NewRequiredPlugin = "";
+        }
+        
+        // Voice Chat Required
+        ImGui.Checkbox("Voice Chat Required", ref EditVoiceChatRequired);
+        
+        // Loot Rules
+        ImGui.Text("Loot Rules");
+        var lootRulesKeys = new[] { "ffa", "need_greed", "master_loot", "reserved", "discuss" };
+        var lootRulesDisplays = new[] { "Free for All", "Need/Greed", "Master Loot", "Reserved Items", "Discuss Before" };
+        var currentLootIndex = Array.IndexOf(lootRulesKeys, EditLootRules);
+        if (currentLootIndex == -1) currentLootIndex = 1; // Default to need_greed
+        
+        if (ImGui.Combo("##lootrules", ref currentLootIndex, lootRulesDisplays, lootRulesDisplays.Length))
+        {
+            EditLootRules = lootRulesKeys[currentLootIndex];
+        }
+        
+        // Parse Requirement
+        ImGui.Text("Parse Requirement");
+        var parseKeys = new[] { "none", "grey", "green", "blue", "purple", "orange", "gold" };
+        var parseDisplays = new[] { "No Parse Requirement", "Grey+ (1-24th percentile)", "Green+ (25-49th percentile)", "Blue+ (50-74th percentile)", "Purple+ (75-94th percentile)", "Orange+ (95-98th percentile)", "Gold+ (99th percentile)" };
+        var currentParseIndex = Array.IndexOf(parseKeys, EditParseRequirement);
+        if (currentParseIndex == -1) currentParseIndex = 0;
+        
+        if (ImGui.Combo("##parserequirement", ref currentParseIndex, parseDisplays, parseDisplays.Length))
+        {
+            EditParseRequirement = parseKeys[currentParseIndex];
+        }
+    }
+    
+    private void DrawTagsAndStrategiesTab()
+    {
         // Tags
         ImGui.Text("Tags");
         for (int i = EditUserTags.Count - 1; i >= 0; i--)
         {
             ImGui.Text($"• {EditUserTags[i]}");
             ImGui.SameLine();
-            if (ImGui.SmallButton($"Remove##{i}"))
+            if (ImGui.SmallButton($"Remove##tag{i}"))
             {
                 EditUserTags.RemoveAt(i);
             }
@@ -313,21 +525,31 @@ public class ListingDetailWindow : Window, IDisposable
                 else
                 {
                     IsEditing = false;
-                    // Reset fields
-                    EditName = Listing.Name;
+                    // Reset fields to original values
+                    EditCfcId = Listing.CfcId;
                     EditDescription = Listing.Description;
                     EditStatus = Listing.Status;
-                    EditMaxParticipants = Listing.MaxParticipants;
-                    EditEventDate = Listing.EventDate ?? DateTime.Now.AddHours(1);
                     EditUserTags = new List<string>(Listing.UserTags);
                     EditUserStrategies = new List<string>(Listing.UserStrategies);
+                    EditMinItemLevel = Listing.MinItemLevel;
+                    EditMaxItemLevel = Listing.MaxItemLevel;
+                    EditRequiredClears = new List<uint>(Listing.RequiredClears);
+                    EditProgPoint = Listing.ProgPoint;
+                    EditExperienceLevel = Listing.ExperienceLevel;
+                    EditRequiredPlugins = new List<string>(Listing.RequiredPlugins);
+                    EditVoiceChatRequired = Listing.VoiceChatRequired;
+                    EditLootRules = Listing.LootRules;
+                    EditParseRequirement = Listing.ParseRequirement;
+                    EditDatacenter = Listing.Datacenter;
+                    EditWorld = Listing.World;
+                    EditPfCode = Listing.PfCode;
                 }
             }
         }
         else
         {
             // View mode buttons
-            if (!IsCreateMode && ImGui.Button("Join Party") && !Listing.IsFull && Listing.IsActive)
+            if (!IsCreateMode && ImGui.Button("Join Party") && Listing.IsActive)
             {
                 // Handle join party action
                 // Plugin.JoinParty(Listing.Id);
@@ -357,11 +579,59 @@ public class ListingDetailWindow : Window, IDisposable
         }
     }
     
+    private void DrawDutySelector()
+    {
+        // Display current selection as a selectable
+        var currentDutyName = SelectedDuty.HasValue && !SelectedDuty.Value.Name.IsEmpty ? SelectedDuty.Value.Name.ExtractText() : "No duty selected";
+        var currentDutyType = SelectedDuty.HasValue ? Plugin.ContentFinderService.GetContentTypeName(SelectedDuty.Value) : "";
+        var displayText = SelectedDuty.HasValue ? $"{currentDutyName} ({currentDutyType})" : "Click to select duty...";
+        
+        // Make the current duty name selectable to open duty selection
+        if (ImGui.Selectable(displayText, false, ImGuiSelectableFlags.None, new Vector2(0, 25)))
+        {
+            // Open duty selector modal
+            DutySelectorModal.Open(SelectedDuty, OnDutySelected);
+        }
+        
+        // Add tooltip to the selectable
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("Click to change duty");
+        }
+
+        // Display current selection info
+        if (SelectedDuty.HasValue)
+        {
+            ImGui.TextDisabled($"ID: {SelectedDuty.Value.RowId}, Level: {SelectedDuty.Value.ClassJobLevelRequired}, Item Level: {SelectedDuty.Value.ItemLevelRequired}");
+        }
+
+        ImGui.Separator();
+    }
+
+    private void OnDutySelected(ContentFinderCondition? selectedDuty)
+    {
+        SelectedDuty = selectedDuty;
+        EditCfcId = selectedDuty?.RowId ?? 0;
+    }
+    
     private async Task SaveListingAsync()
     {
-        if (string.IsNullOrWhiteSpace(EditName))
+        // Validation
+        if (EditCfcId == 0)
         {
-            Svc.Log.Warning("Party name is required");
+            Svc.Log.Warning("Content Finder ID is required");
+            return;
+        }
+        
+        if (string.IsNullOrWhiteSpace(EditDatacenter))
+        {
+            Svc.Log.Warning("Datacenter is required");
+            return;
+        }
+        
+        if (string.IsNullOrWhiteSpace(EditWorld))
+        {
+            Svc.Log.Warning("World is required");
             return;
         }
         
@@ -373,15 +643,24 @@ public class ListingDetailWindow : Window, IDisposable
             var updatedListing = new PartyListing
             {
                 Id = Listing.Id,
-                Name = EditName.Trim(),
+                CfcId = EditCfcId,
                 Description = EditDescription.Trim(),
                 Status = IsCreateMode ? "active" : EditStatus,
-                EventDate = EditEventDate,
-                MaxParticipants = EditMaxParticipants,
-                CurrentParticipants = Listing.CurrentParticipants,
                 UserTags = new List<string>(EditUserTags),
                 UserStrategies = new List<string>(EditUserStrategies),
-                Venue = Listing.Venue,
+                MinItemLevel = EditMinItemLevel,
+                MaxItemLevel = EditMaxItemLevel,
+                RequiredClears = new List<uint>(EditRequiredClears),
+                ProgPoint = EditProgPoint.Trim(),
+                ExperienceLevel = EditExperienceLevel,
+                RequiredPlugins = new List<string>(EditRequiredPlugins),
+                VoiceChatRequired = EditVoiceChatRequired,
+                JobRequirements = new Dictionary<string, object>(), // TODO: Implement job requirements UI
+                LootRules = EditLootRules,
+                ParseRequirement = EditParseRequirement,
+                Datacenter = EditDatacenter,
+                World = EditWorld,
+                PfCode = EditPfCode.Trim(),
                 Creator = Listing.Creator,
                 CreatedAt = Listing.CreatedAt,
                 UpdatedAt = DateTime.Now
@@ -401,11 +680,11 @@ public class ListingDetailWindow : Window, IDisposable
             {
                 // Update the current listing with the server response
                 Listing = result;
-                WindowName = $"Party Listing: {Listing.Name}##{Listing.Id}";
+                WindowName = $"Duty #{Listing.CfcId}##{Listing.Id}";
                 IsEditing = false;
                 IsCreateMode = false;
                 
-                Svc.Log.Info($"Successfully {(IsCreateMode ? "created" : "updated")} listing: {Listing.Name}");
+                Svc.Log.Info($"Successfully {(IsCreateMode ? "created" : "updated")} listing for duty #{Listing.CfcId}");
             }
             else
             {

@@ -110,7 +110,6 @@ public class MainWindow : Window, IDisposable
         {
             // Search filter
             if (!string.IsNullOrEmpty(CurrentFilters.Search) && 
-                !listing.Name.Contains(CurrentFilters.Search, StringComparison.OrdinalIgnoreCase) &&
                 !listing.Description.Contains(CurrentFilters.Search, StringComparison.OrdinalIgnoreCase))
                 return false;
 
@@ -120,7 +119,12 @@ public class MainWindow : Window, IDisposable
 
             // Datacenter filter
             if (!string.IsNullOrEmpty(CurrentFilters.Datacenter) && 
-                listing.Venue?.Datacenter != CurrentFilters.Datacenter)
+                listing.Datacenter != CurrentFilters.Datacenter)
+                return false;
+
+            // World filter
+            if (!string.IsNullOrEmpty(CurrentFilters.World) && 
+                listing.World != CurrentFilters.World)
                 return false;
 
             // RP flag filter
@@ -176,15 +180,24 @@ public class MainWindow : Window, IDisposable
         var newListing = new PartyListing
         {
             Id = Guid.NewGuid().ToString(), // Generate temporary ID for create mode
-            Name = "",
+            CfcId = 0, // Will be set by user
             Description = "",
             Status = "draft",
-            EventDate = DateTime.Now.AddHours(1), // Default to 1 hour from now
-            MaxParticipants = 8,
-            CurrentParticipants = 1,
             UserTags = new List<string>(),
             UserStrategies = new List<string>(),
-            Venue = null,
+            MinItemLevel = 0,
+            MaxItemLevel = 0,
+            RequiredClears = new List<uint>(),
+            ProgPoint = "",
+            ExperienceLevel = "fresh",
+            RequiredPlugins = new List<string>(),
+            VoiceChatRequired = false,
+            JobRequirements = new Dictionary<string, object>(),
+            LootRules = "need_greed",
+            ParseRequirement = "none",
+            Datacenter = "", // Will be set based on user's current datacenter
+            World = "", // Will be set based on user's current world
+            PfCode = "",
             Creator = CurrentUserProfile,
             CreatedAt = DateTime.Now,
             UpdatedAt = DateTime.Now
@@ -441,10 +454,10 @@ public class MainWindow : Window, IDisposable
             ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable | 
             ImGuiTableFlags.Sortable | ImGuiTableFlags.ScrollY))
         {
-            ImGui.TableSetupColumn("Name", ImGuiTableColumnFlags.WidthFixed, 200);
+            ImGui.TableSetupColumn("Duty ID", ImGuiTableColumnFlags.WidthFixed, 80);
             ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthFixed, 80);
-            ImGui.TableSetupColumn("Participants", ImGuiTableColumnFlags.WidthFixed, 80);
-            ImGui.TableSetupColumn("Event Time", ImGuiTableColumnFlags.WidthFixed, 120);
+            ImGui.TableSetupColumn("Experience", ImGuiTableColumnFlags.WidthFixed, 100);
+            ImGui.TableSetupColumn("Requirements", ImGuiTableColumnFlags.WidthFixed, 200);
             ImGui.TableSetupColumn("Location", ImGuiTableColumnFlags.WidthFixed, 150);
             ImGui.TableSetupColumn("Tags", ImGuiTableColumnFlags.WidthStretch);
             ImGui.TableHeadersRow();
@@ -453,10 +466,10 @@ public class MainWindow : Window, IDisposable
             {
                 ImGui.TableNextRow();
 
-                // Name column (clickable)
+                // Duty ID column (clickable)
                 if (ImGui.TableNextColumn())
                 {
-                    if (ImGui.Selectable(listing.Name, false, ImGuiSelectableFlags.SpanAllColumns))
+                    if (ImGui.Selectable($"#{listing.CfcId}", false, ImGuiSelectableFlags.SpanAllColumns))
                     {
                         OpenListingWindow(listing);
                     }
@@ -479,28 +492,42 @@ public class MainWindow : Window, IDisposable
                     ImGui.TextColored(statusColor, listing.StatusDisplay);
                 }
 
-                // Participants column
+                // Experience level column
                 if (ImGui.TableNextColumn())
                 {
-                    ImGui.Text(listing.ParticipantsDisplay);
+                    ImGui.Text(listing.ExperienceLevelDisplay);
                 }
 
-                // Event time column
+                // Requirements column
                 if (ImGui.TableNextColumn())
                 {
-                    ImGui.Text(listing.EventDateDisplay);
+                    var requirements = listing.RequirementsDisplay;
+                    if (requirements.Length > 30)
+                        requirements = requirements.Substring(0, 27) + "...";
+                    ImGui.Text(requirements);
+                    if (ImGui.IsItemHovered() && listing.RequirementsDisplay.Length > 30)
+                    {
+                        ImGui.SetTooltip(listing.RequirementsDisplay);
+                    }
                 }
 
                 // Location column
                 if (ImGui.TableNextColumn())
                 {
-                    ImGui.Text(listing.VenueDisplay);
+                    ImGui.Text(listing.LocationDisplay);
                 }
 
                 // Tags column
                 if (ImGui.TableNextColumn())
                 {
-                    ImGui.Text(listing.TagsDisplay);
+                    var tagsDisplay = listing.TagsDisplay;
+                    if (tagsDisplay.Length > 40)
+                        tagsDisplay = tagsDisplay.Substring(0, 37) + "...";
+                    ImGui.Text(tagsDisplay);
+                    if (ImGui.IsItemHovered() && listing.TagsDisplay.Length > 40)
+                    {
+                        ImGui.SetTooltip(listing.TagsDisplay);
+                    }
                 }
             }
 

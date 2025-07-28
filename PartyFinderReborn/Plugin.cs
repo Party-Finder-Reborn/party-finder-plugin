@@ -14,6 +14,7 @@ public sealed class Plugin : IDalamudPlugin
 
     public Configuration Configuration { get; init; }
     public PartyFinderApiService ApiService { get; init; }
+    public ContentFinderService ContentFinderService { get; init; }
 
     public readonly WindowSystem WindowSystem = new("PartyFinderReborn");
     private ConfigWindow ConfigWindow { get; init; }
@@ -26,8 +27,9 @@ public sealed class Plugin : IDalamudPlugin
 
         Configuration = pluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
         
-        // Initialize API service
+        // Initialize services
         ApiService = new PartyFinderApiService(Configuration);
+        ContentFinderService = new ContentFinderService();
 
         // Initialize windows
         ConfigWindow = new ConfigWindow(this);
@@ -57,6 +59,7 @@ public sealed class Plugin : IDalamudPlugin
         ConfigWindow?.Dispose();
         MainWindow?.Dispose();
         ApiService?.Dispose();
+        ContentFinderService?.Dispose();
 
         Svc.Commands.RemoveHandler(CommandName);
 

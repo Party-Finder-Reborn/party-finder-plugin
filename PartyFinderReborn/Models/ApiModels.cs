@@ -31,50 +31,6 @@ public class UserProfile
     public string DisplayName => DiscordGlobalName ?? DiscordUsername ?? DiscordId;
 }
 
-/// <summary>
-/// Venue information for party locations
-/// </summary>
-public class Venue
-{
-    [JsonProperty("id")]
-    public int Id { get; set; }
-    
-    [JsonProperty("name")]
-    public string Name { get; set; } = string.Empty;
-    
-    [JsonProperty("address")]
-    public string Address { get; set; } = string.Empty;
-    
-    [JsonProperty("datacenter")]
-    public string Datacenter { get; set; } = string.Empty;
-    
-    [JsonProperty("world")]
-    public string World { get; set; } = string.Empty;
-    
-    [JsonProperty("capacity")]
-    public int? Capacity { get; set; }
-    
-    [JsonProperty("usage_count")]
-    public int UsageCount { get; set; }
-    
-    public string DisplayName => $"{Name} ({World}, {Datacenter})";
-    
-    public string DatacenterDisplay => Datacenter switch
-    {
-        "aether" => "Aether",
-        "crystal" => "Crystal", 
-        "dynamis" => "Dynamis",
-        "primal" => "Primal",
-        "chaos" => "Chaos",
-        "light" => "Light",
-        "materia" => "Materia",
-        "elemental" => "Elemental",
-        "gaia" => "Gaia",
-        "mana" => "Mana",
-        "meteor" => "Meteor",
-        _ => Datacenter
-    };
-}
 
 /// <summary>
 /// Party listing information
@@ -84,8 +40,8 @@ public class PartyListing
     [JsonProperty("id")]
     public string Id { get; set; } = string.Empty;
     
-    [JsonProperty("name")]
-    public string Name { get; set; } = string.Empty;
+    [JsonProperty("cfc_id")]
+    public uint CfcId { get; set; }
     
     [JsonProperty("description")]
     public string Description { get; set; } = string.Empty;
@@ -93,23 +49,52 @@ public class PartyListing
     [JsonProperty("status")]
     public string Status { get; set; } = string.Empty;
     
-    [JsonProperty("event_date")]
-    public DateTime? EventDate { get; set; }
-    
-    [JsonProperty("max_participants")]
-    public int MaxParticipants { get; set; }
-    
-    [JsonProperty("current_participants")]
-    public int CurrentParticipants { get; set; }
-    
     [JsonProperty("user_tags")]
     public List<string> UserTags { get; set; } = new();
     
     [JsonProperty("user_strategies")]
     public List<string> UserStrategies { get; set; } = new();
     
-    [JsonProperty("venue")]
-    public Venue? Venue { get; set; }
+    // === REQUIREMENT FIELDS ===
+    
+    [JsonProperty("min_item_level")]
+    public int MinItemLevel { get; set; }
+    
+    [JsonProperty("max_item_level")]
+    public int MaxItemLevel { get; set; }
+    
+    [JsonProperty("required_clears")]
+    public List<uint> RequiredClears { get; set; } = new();
+    
+    [JsonProperty("prog_point")]
+    public string ProgPoint { get; set; } = string.Empty;
+    
+    [JsonProperty("experience_level")]
+    public string ExperienceLevel { get; set; } = string.Empty;
+    
+    [JsonProperty("required_plugins")]
+    public List<string> RequiredPlugins { get; set; } = new();
+    
+    [JsonProperty("voice_chat_required")]
+    public bool VoiceChatRequired { get; set; }
+    
+    [JsonProperty("job_requirements")]
+    public Dictionary<string, object> JobRequirements { get; set; } = new();
+    
+    [JsonProperty("loot_rules")]
+    public string LootRules { get; set; } = string.Empty;
+    
+    [JsonProperty("parse_requirement")]
+    public string ParseRequirement { get; set; } = string.Empty;
+    
+    [JsonProperty("datacenter")]
+    public string Datacenter { get; set; } = string.Empty;
+    
+    [JsonProperty("world")]
+    public string World { get; set; } = string.Empty;
+    
+    [JsonProperty("pf_code")]
+    public string PfCode { get; set; } = string.Empty;
     
     [JsonProperty("creator")]
     public UserProfile? Creator { get; set; }
@@ -121,8 +106,6 @@ public class PartyListing
     public DateTime UpdatedAt { get; set; }
     
     // Computed properties
-    public int AvailableSlots => Math.Max(0, MaxParticipants - CurrentParticipants);
-    public bool IsFull => CurrentParticipants >= MaxParticipants;
     public bool IsActive => Status == "active";
     public string TagsDisplay => string.Join(", ", UserTags);
     public string StrategiesDisplay => string.Join(", ", UserStrategies);
@@ -138,13 +121,87 @@ public class PartyListing
         _ => Status
     };
     
-    public string EventDateDisplay => EventDate?.ToString("yyyy-MM-dd HH:mm") ?? "No Date";
+    public string ExperienceLevelDisplay => ExperienceLevel switch
+    {
+        "fresh" => "Fresh/Learning",
+        "some_exp" => "Some Experience",
+        "experienced" => "Experienced",
+        "farm" => "Farm/Clear",
+        "reclear" => "Weekly Reclear",
+        _ => ExperienceLevel
+    };
     
-    public string ParticipantsDisplay => $"{CurrentParticipants}/{MaxParticipants}";
+    public string LootRulesDisplay => LootRules switch
+    {
+        "ffa" => "Free for All",
+        "need_greed" => "Need/Greed",
+        "master_loot" => "Master Loot",
+        "reserved" => "Reserved Items",
+        "discuss" => "Discuss Before",
+        _ => LootRules
+    };
     
-    public string VenueDisplay => Venue?.DisplayName ?? "No Venue";
+    public string ParseRequirementDisplay => ParseRequirement switch
+    {
+        "none" => "No Parse Requirement",
+        "grey" => "Grey+ (1-24th percentile)",
+        "green" => "Green+ (25-49th percentile)",
+        "blue" => "Blue+ (50-74th percentile)",
+        "purple" => "Purple+ (75-94th percentile)",
+        "orange" => "Orange+ (95-98th percentile)",
+        "gold" => "Gold+ (99th percentile)",
+        _ => ParseRequirement
+    };
+    
+    public string LocationDisplay => $"{World} ({DatacenterDisplay})";
+    
+    public string DatacenterDisplay => Datacenter switch
+    {
+        "aether" => "Aether",
+        "crystal" => "Crystal",
+        "dynamis" => "Dynamis",
+        "primal" => "Primal",
+        "chaos" => "Chaos",
+        "light" => "Light",
+        "materia" => "Materia",
+        "elemental" => "Elemental",
+        "gaia" => "Gaia",
+        "mana" => "Mana",
+        "meteor" => "Meteor",
+        _ => Datacenter
+    };
     
     public string CreatorDisplay => Creator?.DisplayName ?? "Unknown";
+    
+    public string RequirementsDisplay
+    {
+        get
+        {
+            var requirements = new List<string>();
+            
+            if (MinItemLevel > 0)
+            {
+                if (MaxItemLevel > 0)
+                    requirements.Add($"ilvl {MinItemLevel}-{MaxItemLevel}");
+                else
+                    requirements.Add($"ilvl {MinItemLevel}+");
+            }
+            
+            if (!string.IsNullOrEmpty(ProgPoint))
+                requirements.Add($"Prog: {ProgPoint}");
+            
+            if (ExperienceLevel != "fresh")
+                requirements.Add(ExperienceLevelDisplay);
+            
+            if (ParseRequirement != "none")
+                requirements.Add(ParseRequirementDisplay);
+            
+            if (VoiceChatRequired)
+                requirements.Add("Voice required");
+            
+            return requirements.Count > 0 ? string.Join(", ", requirements) : "No special requirements";
+        }
+    }
 }
 
 /// <summary>
@@ -207,7 +264,7 @@ public class ListingFilters
             parameters["datacenter"] = Datacenter;
         
         if (!string.IsNullOrEmpty(World))
-            parameters["venue__world"] = World;
+            parameters["world"] = World;
         
         if (!string.IsNullOrEmpty(Status))
             parameters["status"] = Status;

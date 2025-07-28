@@ -134,40 +134,6 @@ public class PartyFinderApiService : IDisposable
         }
     }
     
-    /// <summary>
-    /// Get venues with optional filters
-    /// </summary>
-    public async Task<ApiResponse<Venue>?> GetVenuesAsync(string? datacenter = null, string? world = null)
-    {
-        try
-        {
-            var url = $"{Constants.ApiBaseUrl}/api/v1/venues/";
-            
-            var queryParams = new List<string>();
-            if (!string.IsNullOrEmpty(datacenter))
-                queryParams.Add($"datacenter={Uri.EscapeDataString(datacenter)}");
-            if (!string.IsNullOrEmpty(world))
-                queryParams.Add($"world={Uri.EscapeDataString(world)}");
-            
-            if (queryParams.Count > 0)
-                url += "?" + string.Join("&", queryParams);
-            
-            var response = await _httpClient.GetAsync(url);
-            
-            if (response.IsSuccessStatusCode)
-            {
-                var json = await response.Content.ReadAsStringAsync();
-                return JsonConvert.DeserializeObject<ApiResponse<Venue>>(json);
-            }
-            
-            return null;
-        }
-        catch (Exception ex)
-        {
-            Svc.Log.Error($"Error getting venues: {ex.Message}");
-            return null;
-        }
-    }
     
     /// <summary>
     /// Get popular tags
