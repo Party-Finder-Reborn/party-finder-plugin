@@ -28,6 +28,7 @@ public class ListingDetailWindow : Window, IDisposable
     private List<string> EditUserStrategies;
     private string NewTag;
     private string NewStrategy;
+    private List<PopularItem> PopularTags;
 
     public ListingDetailWindow(Plugin plugin, PartyListing listing, bool createMode = false) 
         : base(createMode ? $"Create New Party Listing##create_{listing.Id}" : $"Party Listing: {listing.Name}##{listing.Id}")
@@ -54,6 +55,10 @@ public class ListingDetailWindow : Window, IDisposable
         EditUserStrategies = new List<string>(listing.UserStrategies);
         NewTag = "";
         NewStrategy = "";
+        PopularTags = new List<PopularItem>();
+        
+        // Load popular tags
+        _ = LoadPopularTagsAsync();
     }
 
     public void Dispose() 
@@ -70,6 +75,22 @@ public class ListingDetailWindow : Window, IDisposable
         catch (Exception ex)
         {
             Svc.Log.Error($"Error removing window from system: {ex.Message}");
+        }
+    }
+    
+    private async Task LoadPopularTagsAsync()
+    {
+        try
+        {
+            var response = await Plugin.ApiService.GetPopularTagsAsync();
+            if (response != null)
+            {
+                PopularTags = response.Results.Take(10).ToList(); // Limit to top 10 for the detail window
+            }
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Failed to load popular tags: {ex.Message}");
         }
     }
 
@@ -211,9 +232,22 @@ public class ListingDetailWindow : Window, IDisposable
             }
         }
         
+        ImGui.Text("Popular Tags");
+        if (ImGui.BeginListBox("##popularlisttags", new Vector2(0, 100)))
+        {
+            foreach (var tag in PopularTags.Select(t => t.Name))
+            {
+                if (ImGui.Selectable(tag, tag == NewTag))
+                {
+                    NewTag = tag;
+                }
+            }
+            ImGui.EndListBox();
+        }
+
         ImGui.InputText("Add Tag", ref NewTag, 50);
         ImGui.SameLine();
-        if (ImGui.Button("Add Tag") && !string.IsNullOrWhiteSpace(NewTag))
+        if (ImGui.Button("Add Tag") && !string.IsNullOrWhiteSpace(NewTag) && !EditUserTags.Contains(NewTag))
         {
             EditUserTags.Add(NewTag.Trim());
             NewTag = "";
@@ -233,9 +267,22 @@ public class ListingDetailWindow : Window, IDisposable
             }
         }
         
+        ImGui.Text("Popular Strategies/Tags");
+        if (ImGui.BeginListBox("##popularstrategies", new Vector2(0, 80)))
+        {
+            foreach (var tag in PopularTags.Select(t => t.Name))
+            {
+                if (ImGui.Selectable(tag, tag == NewStrategy))
+                {
+                    NewStrategy = tag;
+                }
+            }
+            ImGui.EndListBox();
+        }
+        
         ImGui.InputText("Add Strategy", ref NewStrategy, 100);
         ImGui.SameLine();
-        if (ImGui.Button("Add Strategy") && !string.IsNullOrWhiteSpace(NewStrategy))
+        if (ImGui.Button("Add Strategy") && !string.IsNullOrWhiteSpace(NewStrategy) && !EditUserStrategies.Contains(NewStrategy))
         {
             EditUserStrategies.Add(NewStrategy.Trim());
             NewStrategy = "";

@@ -21,6 +21,8 @@ public class MainWindow : Window, IDisposable
     private string ConnectionStatus;
     private DateTime LastRefresh;
     private Dictionary<string, ListingDetailWindow> OpenDetailWindows;
+    private List<PopularItem> PopularTags;
+    private string NewFilterTag;
 
     public MainWindow(Plugin plugin) : base("Party Finder Reborn")
     {
@@ -38,10 +40,13 @@ public class MainWindow : Window, IDisposable
         ConnectionStatus = "Disconnected";
         LastRefresh = DateTime.MinValue;
         OpenDetailWindows = new Dictionary<string, ListingDetailWindow>();
+        PopularTags = new List<PopularItem>();
+        NewFilterTag = "";
 
         // Load data on initialization
         _ = LoadUserDataAsync();
         _ = LoadPartyListingsAsync();
+        _ = LoadPopularTagsAsync();
     }
 
     private async Task LoadUserDataAsync()
@@ -83,6 +88,22 @@ public class MainWindow : Window, IDisposable
         }
     }
 
+    private async Task LoadPopularTagsAsync()
+    {
+        try
+        {
+            var response = await Plugin.ApiService.GetPopularTagsAsync();
+            if (response != null)
+            {
+                PopularTags = response.Results.Take(20).ToList(); // Limit to top 20 popular tags
+            }
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Failed to load popular tags: {ex.Message}");
+        }
+    }
+
     private void ApplyFilters()
     {
         FilteredListings = PartyListings.Where(listing =>
@@ -105,6 +126,16 @@ public class MainWindow : Window, IDisposable
             // RP flag filter
             if (CurrentFilters.RpFlag.HasValue && listing.IsRoleplay != CurrentFilters.RpFlag.Value)
                 return false;
+
+            // Tag filters - listing must contain all selected tags
+            if (CurrentFilters.Tags.Count > 0)
+            {
+                foreach (var filterTag in CurrentFilters.Tags)
+                {
+                    if (!listing.UserTags.Any(tag => tag.Contains(filterTag, StringComparison.OrdinalIgnoreCase)))
+                        return false;
+                }
+            }
 
             return true;
         }).ToList();
@@ -279,6 +310,7 @@ public class MainWindow : Window, IDisposable
         if (ImGui.Button("🔄 Refresh Listings"))
         {
             _ = LoadPartyListingsAsync();
+            _ = LoadPopularTagsAsync(); // Also refresh popular tags
         }
         
         ImGui.SameLine();
@@ -352,7 +384,47 @@ public class MainWindow : Window, IDisposable
         }
         
         ImGui.Separator();
+
+        // Popular Tags
+        ImGui.Text("Popular Tags");
         
+        if (ImGui.BeginListBox("##populartags", new Vector2(0, 100)))
+        {
+            foreach (var tag in PopularTags.Select(t => t.Name))
+            {
+                if (ImGui.Selectable(tag, tag == NewFilterTag))
+                {
+                    NewFilterTag = tag;
+                }
+            }
+            ImGui.EndListBox();
+        }
+        
+        // Tag filter entry
+        ImGui.InputText("Add Filter Tag", ref NewFilterTag, 50);
+        ImGui.SameLine();
+        if (ImGui.Button("Add Tag") && !string.IsNullOrWhiteSpace(NewFilterTag) && !CurrentFilters.Tags.Contains(NewFilterTag))
+        {
+            CurrentFilters.Tags.Add(NewFilterTag);
+            NewFilterTag = "";
+            ApplyFilters();
+        }
+
+        // Display current filter tags
+        ImGui.Text("Filter Tags:");
+        for (int i = CurrentFilters.Tags.Count - 1; i >= 0; i--)
+        {
+            ImGui.Text($"• {CurrentFilters.Tags[i]}");
+            ImGui.SameLine();
+            if (ImGui.SmallButton($"Remove##filtertag{i}"))
+            {
+                CurrentFilters.Tags.RemoveAt(i);
+                ApplyFilters();
+            }
+        }
+        
+        ImGui.Separator();
+
         // Reset filters button
         if (ImGui.Button("Reset Filters"))
         {
