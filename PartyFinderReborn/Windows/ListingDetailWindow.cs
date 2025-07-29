@@ -28,7 +28,7 @@ public class ListingDetailWindow : Window, IDisposable
     private int EditMinItemLevel;
     private int EditMaxItemLevel;
     private List<uint> EditRequiredClears;
-    private string EditProgPoint;
+    private List<uint> EditProgPoint; // Changed from string to List<uint>
     private string EditExperienceLevel;
     private List<string> EditRequiredPlugins;
     private bool EditVoiceChatRequired;
@@ -79,7 +79,8 @@ public class ListingDetailWindow : Window, IDisposable
         EditMinItemLevel = listing.MinItemLevel;
         EditMaxItemLevel = listing.MaxItemLevel;
         EditRequiredClears = new List<uint>(listing.RequiredClears);
-        EditProgPoint = listing.ProgPoint;
+        // Initialize EditProgPoint: backward compatibility with string format
+        EditProgPoint = ParseProgPointFromString(listing.ProgPoint);
         EditExperienceLevel = listing.ExperienceLevel;
         EditRequiredPlugins = new List<string>(listing.RequiredPlugins);
         EditVoiceChatRequired = listing.VoiceChatRequired;
@@ -192,7 +193,18 @@ public class ListingDetailWindow : Window, IDisposable
         
         if (!string.IsNullOrEmpty(Listing.ProgPoint))
         {
-            ImGui.Text($"• Progression Point: {Listing.ProgPoint}");
+            // Try to display progress points as resolved action names
+            var progPoints = ParseProgPointFromString(Listing.ProgPoint);
+            if (progPoints.Count > 0)
+            {
+                var progPointNames = progPoints.Select(id => Plugin.ActionNameService.Get(id));
+                ImGui.Text($"• Progress Points: {string.Join(", ", progPointNames)}");
+            }
+            else
+            {
+                // Fallback to displaying the raw string
+                ImGui.Text($"• Progression Point: {Listing.ProgPoint}");
+            }
         }
         
         if (Listing.RequiredClears.Count > 0)
@@ -353,9 +365,8 @@ public class ListingDetailWindow : Window, IDisposable
         ImGui.SliderInt("Min Item Level##minilvl", ref EditMinItemLevel, 0, 999);
         ImGui.SliderInt("Max Item Level##maxilvl", ref EditMaxItemLevel, 0, 999);
         
-        // Progression Point
-        ImGui.Text("Progression Point");
-        ImGui.InputText("##progpoint", ref EditProgPoint, 200);
+        // Progress Points (Boss Abilities)
+        DrawProgressPointsSection();
         
         // Required Clears
         ImGui.Text("Required Clears");
@@ -527,7 +538,7 @@ public class ListingDetailWindow : Window, IDisposable
                     EditMinItemLevel = Listing.MinItemLevel;
                     EditMaxItemLevel = Listing.MaxItemLevel;
                     EditRequiredClears = new List<uint>(Listing.RequiredClears);
-                    EditProgPoint = Listing.ProgPoint;
+                    EditProgPoint = ParseProgPointFromString(Listing.ProgPoint);
                     EditExperienceLevel = Listing.ExperienceLevel;
                     EditRequiredPlugins = new List<string>(Listing.RequiredPlugins);
                     EditVoiceChatRequired = Listing.VoiceChatRequired;
@@ -652,7 +663,7 @@ public class ListingDetailWindow : Window, IDisposable
                 MinItemLevel = EditMinItemLevel,
                 MaxItemLevel = EditMaxItemLevel,
                 RequiredClears = new List<uint>(EditRequiredClears),
-                ProgPoint = EditProgPoint.Trim(),
+                ProgPoint = FormatProgPointsAsString(EditProgPoint),
                 ExperienceLevel = EditExperienceLevel,
                 RequiredPlugins = new List<string>(EditRequiredPlugins),
                 VoiceChatRequired = EditVoiceChatRequired,
@@ -699,6 +710,148 @@ public class ListingDetailWindow : Window, IDisposable
         finally
         {
             IsSaving = false;
+        }
+    }
+    
+    /// <summary>
+    /// Parse progress points from string format for backward compatibility
+    /// </summary>
+    private List<uint> ParseProgPointFromString(string progPointStr)
+    {
+        var progPoints = new List<uint>();
+        if (string.IsNullOrWhiteSpace(progPointStr))
+            return progPoints;
+        
+        // Try to parse as comma-separated list of IDs first
+        var parts = progPointStr.Split(',', StringSplitOptions.RemoveEmptyEntries);
+        foreach (var part in parts)
+        {
+            if (uint.TryParse(part.Trim(), out var actionId))
+            {
+                progPoints.Add(actionId);
+            }
+        }
+        
+        return progPoints;
+    }
+    
+    /// <summary>
+    /// Convert progress points list to string format for API compatibility
+    /// </summary>
+    private string FormatProgPointsAsString(List<uint> progPoints)
+    {
+        if (progPoints.Count == 0)
+            return string.Empty;
+        
+        // If we have action IDs, try to convert them to names for better readability
+        var names = progPoints.Select(actionId => Plugin.ActionNameService.Get(actionId));
+        return string.Join(", ", names);
+    }
+
+    /// <summary>
+    /// Get user's seen progress points for the current duty from the server via UserProfile
+    /// </summary>
+    private async Task<List<uint>> GetUserSeenProgPointsAsync(uint dutyId)
+    {
+        try
+        {
+            var userProfile = await Plugin.ApiService.GetUserProfileAsync();
+            if (userProfile != null)
+            {
+                return userProfile.GetSeenProgPoints(dutyId);
+            }
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Failed to get user seen prog points: {ex.Message}");
+        }
+        
+        return new List<uint>();
+    }
+    
+    /// <summary>
+    /// Draw the Progress Points (Boss Abilities) section with multi-select interface
+    /// </summary>
+    private void DrawProgressPointsSection()
+    {
+        // Header with collapsible tree node
+        if (ImGui.TreeNode("Progress Points (Boss Abilities)"))
+        {
+            try
+            {
+                // Show currently selected progress points
+                if (EditProgPoint.Count > 0)
+                {
+                    ImGui.Text("Selected Progress Points:");
+                    for (int i = EditProgPoint.Count - 1; i >= 0; i--)
+                    {
+                        var actionId = EditProgPoint[i];
+                        var actionName = Plugin.ActionNameService.Get(actionId);
+                        ImGui.Text($"• {actionName}");
+                        ImGui.SameLine();
+                        if (ImGui.SmallButton($"Remove##progpoint{i}"))
+                        {
+                            EditProgPoint.RemoveAt(i);
+                        }
+                    }
+                    ImGui.Separator();
+                }
+                
+                // Load seen progress points asynchronously
+                var seenProgPoints = new List<uint>();
+                if (EditCfcId > 0)
+                {
+                    // For now, use DutyProgressService to get seen progress points
+                    // Note: This should be updated when user profile is available
+                    seenProgPoints = Plugin.DutyProgressService.GetSeenProgPoints(EditCfcId);
+                }
+                
+                if (seenProgPoints.Count > 0)
+                {
+                    ImGui.Text("Available Progress Points:");
+                    ImGui.TextDisabled("(Based on your seen actions for this duty)");
+                    
+                    // Create a multi-select list of available progress points
+                    if (ImGui.BeginListBox("##availableprogpoints", new Vector2(-1, 150)))
+                    {
+                        foreach (var actionId in seenProgPoints)
+                        {
+                            var actionName = Plugin.ActionNameService.Get(actionId);
+                            var isSelected = EditProgPoint.Contains(actionId);
+                            
+                            if (ImGui.Checkbox($"{actionName}##progpoint_{actionId}", ref isSelected))
+                            {
+                                if (isSelected && !EditProgPoint.Contains(actionId))
+                                {
+                                    EditProgPoint.Add(actionId);
+                                }
+                                else if (!isSelected && EditProgPoint.Contains(actionId))
+                                {
+                                    EditProgPoint.Remove(actionId);
+                                }
+                            }
+                        }
+                        ImGui.EndListBox();
+                    }
+                }
+                else
+                {
+                    ImGui.TextDisabled("No progress points available for this duty.");
+                    ImGui.TextDisabled("Progress points will appear here after you've encountered boss abilities.");
+                }
+                
+                // Add help text
+                ImGui.Separator();
+                ImGui.TextDisabled("Progress points help track specific boss abilities or mechanics you've encountered.");
+                ImGui.TextDisabled("Select the abilities you want party members to have seen.");
+            }
+            catch (Exception ex)
+            {
+                Svc.Log.Error($"Error drawing progress points section: {ex.Message}");
+                ImGui.TextColored(new Vector4(1, 0, 0, 1), "Error loading progress points");
+            }
+            
+            ImGui.TreePop();
         }
     }
 }

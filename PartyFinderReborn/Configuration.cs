@@ -21,6 +21,17 @@ public class Configuration : IPluginConfiguration
     
     // Server Connection Settings
     public string ApiKey { get; set; } = string.Empty;
+    
+    // Action Tracking Configuration
+    public bool EnableActionTracking { get; set; } = true;
+    public bool FilterPlayerActions { get; set; } = true;
+    public bool FilterPartyActions { get; set; } = true;
+    public bool ResetOnInstanceLeave { get; set; } = true;
+    
+    // Action Tracking Filters
+    public bool TrackBossActionsOnly { get; set; } = true;
+    public bool TrackTrashMobs { get; set; } = false;
+    public int SyncDebounceSeconds { get; set; } = 30;
 
     public void Save()
     {

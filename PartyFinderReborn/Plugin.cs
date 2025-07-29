@@ -22,6 +22,8 @@ public sealed class Plugin : IDalamudPlugin
     public PartyFinderApiService ApiService { get; init; }
     public ContentFinderService ContentFinderService { get; init; }
     public DutyProgressService DutyProgressService { get; init; }
+    public ActionNameService ActionNameService { get; init; }
+    public ActionTrackingService ActionTrackingService { get; init; }
 
     public readonly WindowSystem WindowSystem = new("PartyFinderReborn");
     private ConfigWindow ConfigWindow { get; init; }
@@ -38,6 +40,8 @@ public sealed class Plugin : IDalamudPlugin
         ApiService = new PartyFinderApiService(Configuration);
         ContentFinderService = new ContentFinderService();
         DutyProgressService = new DutyProgressService(ContentFinderService, ApiService, Configuration);
+        ActionNameService = new ActionNameService();
+        ActionTrackingService = new ActionTrackingService(DutyProgressService, ContentFinderService, Configuration);
 
         // Initialize windows
         ConfigWindow = new ConfigWindow(this);
@@ -84,6 +88,8 @@ public sealed class Plugin : IDalamudPlugin
 
         ConfigWindow?.Dispose();
         MainWindow?.Dispose();
+        ActionTrackingService?.Dispose();
+        ActionNameService?.Dispose();
         DutyProgressService?.Dispose();
         ApiService?.Dispose();
         ContentFinderService?.Dispose();
@@ -131,11 +137,17 @@ public sealed class Plugin : IDalamudPlugin
             var completedCount = DutyProgressService.GetCompletedDutiesCount();
             var progPointsDutiesCount = DutyProgressService.GetProgPointsDutiesCount();
             var totalProgPointsCount = DutyProgressService.GetTotalProgPointsCount();
+            var sessionProgPointsCount = ActionTrackingService.GetSeenProgPointsCount();
             
             Svc.Log.Info($"Duty Progress Debug Info:");
             Svc.Log.Info($"- Completed duties: {completedCount}");
             Svc.Log.Info($"- Duties with progress points: {progPointsDutiesCount}");
             Svc.Log.Info($"- Total progress points tracked: {totalProgPointsCount}");
+            Svc.Log.Info($"- Session progress points tracked: {sessionProgPointsCount}");
+            Svc.Log.Info($"- Action tracking enabled: {Configuration.EnableActionTracking}");
+            Svc.Log.Info($"- Filter player actions: {Configuration.FilterPlayerActions}");
+            Svc.Log.Info($"- Filter party actions: {Configuration.FilterPartyActions}");
+            Svc.Log.Info($"- Reset on instance leave: {Configuration.ResetOnInstanceLeave}");
             Svc.Log.Info($"- Use {RefreshCommandName} to refresh data from game");
             
             if (completedCount > 0)

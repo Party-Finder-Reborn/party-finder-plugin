@@ -14,9 +14,11 @@ public class ContentFinderService : IDisposable
 {
     private Dictionary<uint, ContentFinderCondition>? _contentFinderCache;
     private List<ContentFinderCondition>? _sortedDuties;
+    private Dictionary<ushort, uint> _territoryToCfc;
     
     public ContentFinderService()
     {
+        _territoryToCfc = new Dictionary<ushort, uint>();
         InitializeCache();
     }
     
@@ -24,6 +26,7 @@ public class ContentFinderService : IDisposable
     {
         _contentFinderCache?.Clear();
         _sortedDuties?.Clear();
+        _territoryToCfc.Clear();
     }
     
     private void InitializeCache()
@@ -34,6 +37,7 @@ public class ContentFinderService : IDisposable
 
             _contentFinderCache = new Dictionary<uint, ContentFinderCondition>();
             var duties = new List<ContentFinderCondition>();
+            _territoryToCfc.Clear();
             
             foreach (var cfc in sheet)
             {
@@ -44,12 +48,20 @@ public class ContentFinderService : IDisposable
                 
                 _contentFinderCache[cfc.RowId] = cfc;
                 duties.Add(cfc);
+                
+                // Build territory to CFC mapping
+                var territoryType = (ushort)cfc.TerritoryType.RowId;
+                if (territoryType != 0 && !_territoryToCfc.ContainsKey(territoryType))
+                {
+                    // Store the first matching RowId for each territory
+                    _territoryToCfc[territoryType] = cfc.RowId;
+                }
             }
             
             // Sort by name for better user experience
             _sortedDuties = duties.OrderBy(d => d.Name.ExtractText()).ToList();
             
-            Svc.Log.Info($"Loaded {_contentFinderCache.Count} Content Finder Conditions");
+            Svc.Log.Info($"Loaded {_contentFinderCache.Count} Content Finder Conditions with {_territoryToCfc.Count} territory mappings");
         }
         catch (Exception ex)
         {
@@ -209,5 +221,27 @@ public class ContentFinderService : IDisposable
             .Distinct()
             .OrderBy(ct => ct)
             .ToList();
+    }
+    
+    /// <summary>
+    /// Get Content Finder Condition ID by territory type
+    /// </summary>
+    /// <param name="territory">Territory type ID</param>
+    /// <returns>CFC ID if found, null otherwise</returns>
+    public uint? GetCfcIdByTerritory(ushort territory)
+    {
+        try
+        {
+            if (_territoryToCfc.TryGetValue(territory, out var cfcId))
+            {
+                return cfcId;
+            }
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Failed to get CFC ID by territory {territory}: {ex.Message}");
+            return null;
+        }
     }
 }

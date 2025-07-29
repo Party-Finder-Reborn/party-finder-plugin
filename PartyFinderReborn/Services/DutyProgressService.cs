@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using ECommons.DalamudServices;
 using FFXIVClientStructs.FFXIV.Client.Game.UI;
@@ -29,7 +30,11 @@ public class DutyProgressService : IDisposable
     // Tracking state
     private bool _isInitialized = false;
     private DateTime _lastSync = DateTime.MinValue;
-    private readonly TimeSpan _syncInterval = TimeSpan.FromMinutes(5); // Sync every 5 minutes
+    private TimeSpan SyncInterval => TimeSpan.FromSeconds(_configuration.SyncDebounceSeconds);
+    
+    // Thread-safety for external prog-point pushes
+    private readonly SemaphoreSlim _progPointsSemaphore = new(1, 1);
+    private readonly SemaphoreSlim _syncSemaphore = new(1, 1);
     
     public DutyProgressService(ContentFinderService contentFinderService, PartyFinderApiService apiService, Configuration configuration)
     {
@@ -49,6 +54,10 @@ public class DutyProgressService : IDisposable
         // Unhook events
         //Svc.DutyState.DutyCompleted -= OnDutyCompleted;
         //Svc.ClientState.TerritoryChanged -= OnTerritoryChanged;
+        
+        // Clean up thread-safety resources
+        _progPointsSemaphore?.Dispose();
+        _syncSemaphore?.Dispose();
     }
     
     /// <summary>
@@ -80,9 +89,9 @@ public class DutyProgressService : IDisposable
     {
         try
         {
-            // Clear existing data
+            // Clear existing completed duties data but preserve progress points
             _completedDuties.Clear();
-            _seenProgPoints.Clear();
+            // NOTE: We intentionally do NOT clear _seenProgPoints here - they are a permanent record
             
             // Use UIState methods to check completion status
             await LoadCompletedDutiesFromUIState();
@@ -250,9 +259,13 @@ public class DutyProgressService : IDisposable
     /// </summary>
     public async Task SyncWithServer()
     {
+        // Use semaphore to prevent multiple simultaneous syncs (debouncing)
+        if (!await _syncSemaphore.WaitAsync(100)) // Quick timeout for debouncing
+            return;
+        
         try
         {
-            if (DateTime.Now - _lastSync < _syncInterval)
+            if (DateTime.Now - _lastSync < SyncInterval)
                 return; // Don't sync too frequently
             
             // Convert to the format expected by the API
@@ -280,6 +293,10 @@ public class DutyProgressService : IDisposable
         {
             Svc.Log.Error($"Failed to sync with server: {ex.Message}");
         }
+        finally
+        {
+            _syncSemaphore.Release();
+        }
     }
     
     /// <summary>
@@ -295,18 +312,44 @@ public class DutyProgressService : IDisposable
     }
     
     /// <summary>
-    /// Add a seen progress point for a duty
+    /// Add a seen progress point for a duty - Thread-safe for external prog-point pushes
     /// </summary>
     public async Task AddSeenProgPoint(uint dutyId, uint actionId)
     {
-        if (!_seenProgPoints.ContainsKey(dutyId))
-            _seenProgPoints[dutyId] = new List<uint>();
+        await _progPointsSemaphore.WaitAsync();
         
-        if (!_seenProgPoints[dutyId].Contains(actionId))
+        try
         {
-            _seenProgPoints[dutyId].Add(actionId);
-            Svc.Log.Debug($"Added progress point {actionId} for duty {dutyId}");
-            await SyncWithServer();
+            bool wasAdded = false;
+            
+            if (!_seenProgPoints.ContainsKey(dutyId))
+                _seenProgPoints[dutyId] = new List<uint>();
+            
+            if (!_seenProgPoints[dutyId].Contains(actionId))
+            {
+                _seenProgPoints[dutyId].Add(actionId);
+                wasAdded = true;
+                Svc.Log.Info($"📝 SAVED PROGRESS POINT: Action {actionId} for duty {dutyId} (Total: {_seenProgPoints[dutyId].Count} for this duty)");
+            }
+            else
+            {
+                Svc.Log.Debug($"Progress point {actionId} already exists for duty {dutyId}, skipping");
+            }
+            
+            // Only sync if we actually added something new
+            if (wasAdded)
+            {
+                // Fire and forget sync - don't await to prevent blocking multiple rapid calls
+                _ = Task.Run(async () => await SyncWithServer());
+            }
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Error adding progress point {actionId} for duty {dutyId}: {ex.Message}");
+        }
+        finally
+        {
+            _progPointsSemaphore.Release();
         }
     }
     
