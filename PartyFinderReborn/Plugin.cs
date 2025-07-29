@@ -14,6 +14,7 @@ namespace PartyFinderReborn;
 public sealed class Plugin : IDalamudPlugin
 {
     private const string CommandName = "/pfreborn";
+    private const string ConfigCommandName = "/pfreborn config";
     private const string RefreshCommandName = "/pfrefresh";
     private const string DebugCommandName = "/pfdebug";
 
@@ -60,6 +61,11 @@ public sealed class Plugin : IDalamudPlugin
         {
             HelpMessage = "Shows debug information about duty progress"
         });
+        
+        Svc.Commands.AddHandler(ConfigCommandName, new CommandInfo(OnConfigCommand)
+        {
+            HelpMessage = "Opens the Party Finder Reborn configuration window"
+        });
 
         // Initialize duty progress tracking
         _ = DutyProgressService.RefreshProgressData();
@@ -85,6 +91,7 @@ public sealed class Plugin : IDalamudPlugin
         Svc.Commands.RemoveHandler(CommandName);
         Svc.Commands.RemoveHandler(RefreshCommandName);
         Svc.Commands.RemoveHandler(DebugCommandName);
+        Svc.Commands.RemoveHandler(ConfigCommandName);
 
         ECommonsMain.Dispose();
     }
@@ -110,6 +117,11 @@ public sealed class Plugin : IDalamudPlugin
                 Svc.Log.Error($"Failed to refresh duty progress data: {ex.Message}");
             }
         });
+    }
+    
+    private void OnConfigCommand(string command, string args)
+    {
+        ToggleConfigUI();
     }
     
     private void OnDebugCommand(string command, string args)
