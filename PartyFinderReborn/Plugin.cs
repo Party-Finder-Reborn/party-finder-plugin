@@ -8,6 +8,8 @@ using PartyFinderReborn.Services;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using ImGuiNET;
+using Dalamud.Plugin.Services;
 
 namespace PartyFinderReborn;
 
@@ -24,10 +26,13 @@ public sealed class Plugin : IDalamudPlugin
     public DutyProgressService DutyProgressService { get; init; }
     public ActionNameService ActionNameService { get; init; }
     public ActionTrackingService ActionTrackingService { get; init; }
+    public WorldService WorldService { get; init; }
 
     public readonly WindowSystem WindowSystem = new("PartyFinderReborn");
     private ConfigWindow ConfigWindow { get; init; }
     private MainWindow MainWindow { get; init; }
+
+    private DateTime lastFrameworkUpdate = DateTime.Now;
 
     public Plugin(IDalamudPluginInterface pluginInterface)
     {
@@ -42,6 +47,7 @@ public sealed class Plugin : IDalamudPlugin
         DutyProgressService = new DutyProgressService(ContentFinderService, ApiService, Configuration);
         ActionNameService = new ActionNameService();
         ActionTrackingService = new ActionTrackingService(DutyProgressService, ContentFinderService, Configuration);
+        WorldService = new WorldService();
 
         // Initialize windows
         ConfigWindow = new ConfigWindow(this);
@@ -81,6 +87,7 @@ public sealed class Plugin : IDalamudPlugin
 
         // Subscribe to login and logout events
         Svc.ClientState.Login += OnLogin;
+        Svc.Framework.Update += OnFrameworkUpdate;
 
         Svc.Log.Info("Party Finder Reborn initialized successfully!");
     }
@@ -113,11 +120,14 @@ public sealed class Plugin : IDalamudPlugin
         DutyProgressService?.Dispose();
         ApiService?.Dispose();
         ContentFinderService?.Dispose();
+        WorldService?.Dispose();
 
         Svc.Commands.RemoveHandler(CommandName);
         Svc.Commands.RemoveHandler(RefreshCommandName);
         Svc.Commands.RemoveHandler(DebugCommandName);
         Svc.Commands.RemoveHandler(ConfigCommandName);
+
+        Svc.Framework.Update -= OnFrameworkUpdate;
 
         ECommonsMain.Dispose();
     }
@@ -186,4 +196,20 @@ public sealed class Plugin : IDalamudPlugin
 
     public void ToggleConfigUI() => ConfigWindow.Toggle();
     public void ToggleMainUI() => MainWindow.Toggle();
+
+    private void OnFrameworkUpdate(IFramework framework)
+    {
+        var now = DateTime.Now;
+        var elapsed = now - lastFrameworkUpdate;
+
+        if (elapsed.TotalSeconds >= Configuration.RefreshIntervalSeconds)
+        {
+            lastFrameworkUpdate = now;
+
+            if (Configuration.AutoRefreshListings && MainWindow.IsOpen)
+            {
+                _ = MainWindow.LoadPartyListingsAsync();
+            }
+        }
+    }
 }

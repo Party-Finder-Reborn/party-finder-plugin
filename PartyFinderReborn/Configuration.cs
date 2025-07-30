@@ -17,7 +17,7 @@ public class Configuration : IPluginConfiguration
     // Plugin Settings
     public bool EnableNotifications { get; set; } = true;
     public bool AutoRefreshListings { get; set; } = true;
-    public int RefreshIntervalSeconds { get; set; } = 30;
+    public int RefreshIntervalSeconds { get; set; } = 60;
     
     // Server Connection Settings
     public string ApiKey { get; set; } = string.Empty;

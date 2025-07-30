@@ -9,7 +9,7 @@ public class ConfigWindow : Window, IDisposable
 {
     private Configuration Configuration;
 
-    public ConfigWindow(Plugin plugin) : base("Party Finder Reborn Configuration")
+    public ConfigWindow(Plugin plugin) : base("Party Finder Reborn Configuration##config_window")
     {
         Flags = ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse;
 

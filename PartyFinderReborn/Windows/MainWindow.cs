@@ -23,8 +23,15 @@ public class MainWindow : Window, IDisposable
     private Dictionary<string, ListingDetailWindow> OpenDetailWindows;
     private List<PopularItem> PopularTags;
     private string NewFilterTag;
+    
+    // Pagination state
+    private string? _currentPageUrl;
+    private string? _nextPageUrl;
+    private string? _prevPageUrl;
+    private int _totalCount;
+    private ApiResponse<PartyListing>? _currentResponse;
 
-    public MainWindow(Plugin plugin) : base("Party Finder Reborn")
+    public MainWindow(Plugin plugin) : base("Party Finder Reborn##main_window")
     {
         SizeConstraints = new WindowSizeConstraints
         {
@@ -65,15 +72,21 @@ public class MainWindow : Window, IDisposable
         }
     }
 
-    private async Task LoadPartyListingsAsync()
+    public async Task LoadPartyListingsAsync(string? pageUrl = null)
     {
         try
         {
             IsLoading = true;
-            var response = await Plugin.ApiService.GetListingsAsync(CurrentFilters);
+            var response = await Plugin.ApiService.GetListingsAsync(CurrentFilters, pageUrl);
+            
             if (response != null)
             {
+                _currentResponse = response;
                 PartyListings = response.Results;
+                _nextPageUrl = response.Next;
+                _prevPageUrl = response.Previous;
+                _totalCount = response.Count;
+                
                 ApplyFilters();
                 LastRefresh = DateTime.Now;
             }
@@ -86,6 +99,12 @@ public class MainWindow : Window, IDisposable
         {
             IsLoading = false;
         }
+    }
+
+    private async Task LoadPartyListingsPageAsync(string? pageUrl)
+    {
+        if (string.IsNullOrEmpty(pageUrl)) return;
+        await LoadPartyListingsAsync(pageUrl);
     }
 
     private async Task LoadPopularTagsAsync()
@@ -195,8 +214,8 @@ public class MainWindow : Window, IDisposable
             JobRequirements = new Dictionary<string, object>(),
             LootRules = "need_greed",
             ParseRequirement = "none",
-            Datacenter = "", // Will be set based on user's current datacenter
-            World = "", // Will be set based on user's current world
+            Datacenter = Plugin.WorldService.GetApiDatacenterName(Plugin.WorldService.GetCurrentPlayerHomeDataCenter() ?? ""),
+            World = Plugin.WorldService.GetCurrentPlayerHomeWorld() ?? "",
             PfCode = "",
             Creator = CurrentUserProfile,
             CreatedAt = DateTime.Now,
@@ -275,16 +294,34 @@ public class MainWindow : Window, IDisposable
         var contentSize = ImGui.GetContentRegionAvail();
         
         // Filters on the left
-        ImGui.BeginChild("FiltersPanel", new Vector2(250, contentSize.Y), true);
+        ImGui.BeginChild("FiltersPanel##filters", new Vector2(250, contentSize.Y), true);
         DrawFilters();
         ImGui.EndChild();
 
         ImGui.SameLine();
 
         // Party listings table on the right
-        ImGui.BeginChild("ListingsPanel", new Vector2(contentSize.X - 260, contentSize.Y), false);
+        ImGui.BeginChild("ListingsPanel##listings", new Vector2(contentSize.X - 260, contentSize.Y), false);
+        
+        // Calculate space for pagination at the bottom
+        var childContentSize = ImGui.GetContentRegionAvail();
+        var paginationHeight = 30f;
+        
+        // Draw table in the remaining space above pagination
+        ImGui.BeginChild("TableArea##table", new Vector2(childContentSize.X, childContentSize.Y - paginationHeight), false);
         DrawListingsTable();
         ImGui.EndChild();
+        
+        // Draw pagination controls at the bottom of the listings panel
+        DrawPaginationControls();
+        
+        ImGui.EndChild();
+        
+        // Draw loading spinner overlay if loading
+        if (IsLoading)
+        {
+            DrawLoadingSpinner();
+        }
     }
 
     private void DrawHeader()
@@ -303,7 +340,8 @@ public class MainWindow : Window, IDisposable
         ImGui.NextColumn();
         
         // Center: General info
-        ImGui.Text($"Total Parties: {FilteredListings.Count}");
+        var displayCount = _totalCount > 0 ? $"Showing: {FilteredListings.Count} | Total: {_totalCount}" : $"Total Parties: {FilteredListings.Count}";
+        ImGui.Text(displayCount);
         
         ImGui.NextColumn();
         
@@ -322,6 +360,13 @@ public class MainWindow : Window, IDisposable
         // Action buttons
         if (ImGui.Button("🔄 Refresh Listings"))
         {
+            // Reset pagination state on refresh
+            _currentPageUrl = null;
+            _nextPageUrl = null;
+            _prevPageUrl = null;
+            _totalCount = 0;
+            _currentResponse = null;
+            
             _ = LoadPartyListingsAsync();
             _ = LoadPopularTagsAsync(); // Also refresh popular tags
         }
@@ -346,7 +391,7 @@ public class MainWindow : Window, IDisposable
         if (ImGui.InputText("Search", ref search, 100))
         {
             CurrentFilters.Search = string.IsNullOrEmpty(search) ? null : search;
-            ApplyFilters();
+            ResetPaginationAndRefresh();
         }
         
         // Status filter
@@ -358,27 +403,50 @@ public class MainWindow : Window, IDisposable
         if (ImGui.Combo("Status", ref currentStatusIndex, statusItems, statusItems.Length))
         {
             CurrentFilters.Status = currentStatusIndex == 0 ? null : statusItems[currentStatusIndex];
-            ApplyFilters();
+            ResetPaginationAndRefresh();
         }
         
-        // Datacenter filter
-        var datacenterItems = new[] { "All" }.Concat(Datacenters.All.Values).ToArray();
-        var currentDatacenterIndex = string.IsNullOrEmpty(CurrentFilters.Datacenter) ? 0 :
-            Array.IndexOf(datacenterItems, Datacenters.All.GetValueOrDefault(CurrentFilters.Datacenter, CurrentFilters.Datacenter));
-        if (currentDatacenterIndex == -1) currentDatacenterIndex = 0;
+        // Datacenter filter with safe guards against missing world lists
+        var datacenters = Plugin.WorldService.GetAllDatacenters();
+        var datacenterItems = new[] { "All" }.Concat(datacenters.Select(dc => dc.Name.ToString())).ToArray();
+        var currentDatacenterIndex = 0;
+        
+        if (!string.IsNullOrEmpty(CurrentFilters.Datacenter))
+        {
+            var currentDc = Plugin.WorldService.GetDatacenterByName(CurrentFilters.Datacenter);
+            if (currentDc.HasValue)
+            {
+                var dcName = currentDc.Value.Name.ToString();
+                currentDatacenterIndex = Array.IndexOf(datacenterItems, dcName);
+                // Guard against missing datacenter - reset safely
+                if (currentDatacenterIndex == -1) 
+                {
+                    currentDatacenterIndex = 0;
+                    CurrentFilters.Datacenter = null; // Reset filter to prevent inconsistent state
+                }
+            }
+        }
         
         if (ImGui.Combo("Datacenter", ref currentDatacenterIndex, datacenterItems, datacenterItems.Length))
         {
             if (currentDatacenterIndex == 0)
             {
                 CurrentFilters.Datacenter = null;
+                // When datacenter changes to "All", also clear world filter to prevent orphaned world selections
+                CurrentFilters.World = null;
             }
             else
             {
-                var selectedDatacenter = datacenterItems[currentDatacenterIndex];
-                CurrentFilters.Datacenter = Datacenters.All.FirstOrDefault(kvp => kvp.Value == selectedDatacenter).Key;
+                var selectedDatacenterName = datacenterItems[currentDatacenterIndex];
+                var selectedDatacenter = datacenters.FirstOrDefault(dc => dc.Name.ToString() == selectedDatacenterName);
+                if (!selectedDatacenter.Equals(default(Lumina.Excel.Sheets.WorldDCGroupType)))
+                {
+                    CurrentFilters.Datacenter = Plugin.WorldService.GetApiDatacenterName(selectedDatacenter.Name.ToString());
+                    // When datacenter changes, reset world filter to prevent invalid world selections
+                    CurrentFilters.World = null;
+                }
             }
-            ApplyFilters();
+            ResetPaginationAndRefresh();
         }
         
         // RP Flag filter
@@ -393,7 +461,7 @@ public class MainWindow : Window, IDisposable
                 2 => false,
                 _ => null
             };
-            ApplyFilters();
+            ResetPaginationAndRefresh();
         }
         
         ImGui.Separator();
@@ -420,7 +488,7 @@ public class MainWindow : Window, IDisposable
         {
             CurrentFilters.Tags.Add(NewFilterTag);
             NewFilterTag = "";
-            ApplyFilters();
+            ResetPaginationAndRefresh();
         }
 
         // Display current filter tags
@@ -432,7 +500,7 @@ public class MainWindow : Window, IDisposable
             if (ImGui.SmallButton($"Remove##filtertag{i}"))
             {
                 CurrentFilters.Tags.RemoveAt(i);
-                ApplyFilters();
+                ResetPaginationAndRefresh();
             }
         }
         
@@ -442,7 +510,7 @@ public class MainWindow : Window, IDisposable
         if (ImGui.Button("Reset Filters"))
         {
             CurrentFilters.Reset();
-            ApplyFilters();
+            ResetPaginationAndRefresh();
         }
     }
 
@@ -452,9 +520,9 @@ public class MainWindow : Window, IDisposable
         
         if (ImGui.BeginTable("PartiesTable", 6, 
             ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable | 
-            ImGuiTableFlags.Sortable | ImGuiTableFlags.ScrollY))
+            ImGuiTableFlags.Sortable | ImGuiTableFlags.ScrollY | ImGuiTableFlags.ScrollX | ImGuiTableFlags.SizingFixedFit))
         {
-            ImGui.TableSetupColumn("Duty ID", ImGuiTableColumnFlags.WidthFixed, 80);
+            ImGui.TableSetupColumn("Duty Name", ImGuiTableColumnFlags.WidthFixed, 0);
             ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthFixed, 80);
             ImGui.TableSetupColumn("Experience", ImGuiTableColumnFlags.WidthFixed, 100);
             ImGui.TableSetupColumn("Requirements", ImGuiTableColumnFlags.WidthFixed, 200);
@@ -466,10 +534,11 @@ public class MainWindow : Window, IDisposable
             {
                 ImGui.TableNextRow();
 
-                // Duty ID column (clickable)
+                // Duty Name column (clickable)
                 if (ImGui.TableNextColumn())
                 {
-                    if (ImGui.Selectable($"#{listing.CfcId}", false, ImGuiSelectableFlags.SpanAllColumns))
+                    var dutyName = Plugin.ContentFinderService.GetDutyDisplayName(listing.CfcId);
+                    if (ImGui.Selectable(dutyName, false, ImGuiSelectableFlags.SpanAllColumns))
                     {
                         OpenListingWindow(listing);
                     }
@@ -502,12 +571,15 @@ public class MainWindow : Window, IDisposable
                 if (ImGui.TableNextColumn())
                 {
                     var requirements = listing.RequirementsDisplay;
-                    if (requirements.Length > 30)
-                        requirements = requirements.Substring(0, 27) + "...";
-                    ImGui.Text(requirements);
-                    if (ImGui.IsItemHovered() && listing.RequirementsDisplay.Length > 30)
+                    // Use dynamic text wrapping instead of manual truncation
+                    ImGui.PushTextWrapPos(ImGui.GetCursorPos().X + ImGui.GetColumnWidth());
+                    ImGui.TextWrapped(requirements);
+                    ImGui.PopTextWrapPos();
+                    
+                    // Fallback tooltip for full text
+                    if (ImGui.IsItemHovered() && requirements.Length > 50)
                     {
-                        ImGui.SetTooltip(listing.RequirementsDisplay);
+                        ImGui.SetTooltip(requirements);
                     }
                 }
 
@@ -521,12 +593,15 @@ public class MainWindow : Window, IDisposable
                 if (ImGui.TableNextColumn())
                 {
                     var tagsDisplay = listing.TagsDisplay;
-                    if (tagsDisplay.Length > 40)
-                        tagsDisplay = tagsDisplay.Substring(0, 37) + "...";
-                    ImGui.Text(tagsDisplay);
-                    if (ImGui.IsItemHovered() && listing.TagsDisplay.Length > 40)
+                    // Use dynamic text wrapping instead of manual truncation
+                    ImGui.PushTextWrapPos(ImGui.GetCursorPos().X + ImGui.GetColumnWidth());
+                    ImGui.TextWrapped(tagsDisplay);
+                    ImGui.PopTextWrapPos();
+                    
+                    // Fallback tooltip for full text
+                    if (ImGui.IsItemHovered() && tagsDisplay.Length > 60)
                     {
-                        ImGui.SetTooltip(listing.TagsDisplay);
+                        ImGui.SetTooltip(tagsDisplay);
                     }
                 }
             }
@@ -538,5 +613,81 @@ public class MainWindow : Window, IDisposable
         {
             ImGui.Text("No parties found matching current filters.");
         }
+    }
+    
+    private void DrawPaginationControls()
+    {
+        if (_currentResponse == null) return;
+        
+        ImGui.Separator();
+        
+        // Pagination info and controls
+        ImGui.Columns(3, "PaginationColumns", false);
+        
+        // Left: Previous button
+        var hasPrevious = !string.IsNullOrEmpty(_prevPageUrl);
+        if (!hasPrevious) ImGui.BeginDisabled();
+        if (ImGui.Button("◀ Previous") && hasPrevious)
+        {
+            _ = LoadPartyListingsPageAsync(_prevPageUrl);
+        }
+        if (!hasPrevious) ImGui.EndDisabled();
+        
+        ImGui.NextColumn();
+        
+        // Center: Page info
+        var pageInfo = $"Total: {_totalCount} listings";
+        var textSize = ImGui.CalcTextSize(pageInfo);
+        var columnWidth = ImGui.GetColumnWidth();
+        var textPosX = (columnWidth - textSize.X) * 0.5f;
+        if (textPosX > 0) ImGui.SetCursorPosX(ImGui.GetCursorPosX() + textPosX);
+        ImGui.Text(pageInfo);
+        
+        ImGui.NextColumn();
+        
+        // Right: Next button
+        var hasNext = !string.IsNullOrEmpty(_nextPageUrl);
+        var buttonSize = ImGui.CalcTextSize("Next ▶");
+        var nextColumnWidth = ImGui.GetColumnWidth();
+        var buttonPosX = nextColumnWidth - buttonSize.X - 20; // 20 for padding
+        if (buttonPosX > 0) ImGui.SetCursorPosX(ImGui.GetCursorPosX() + buttonPosX);
+        
+        if (!hasNext) ImGui.BeginDisabled();
+        if (ImGui.Button("Next ▶") && hasNext)
+        {
+            _ = LoadPartyListingsPageAsync(_nextPageUrl);
+        }
+        if (!hasNext) ImGui.EndDisabled();
+        
+        ImGui.Columns(1);
+    }
+    
+    private void DrawLoadingSpinner()
+    {
+        var center = ImGui.GetIO().DisplaySize / 2;
+        var drawList = ImGui.GetForegroundDrawList();
+        var spinnerColor = ImGui.GetColorU32(ImGuiCol.ButtonHovered);
+        var backgroundColor = ImGui.GetColorU32(ImGuiCol.FrameBg, 0.7f);
+        var radius = 30;
+        var thickness = 5;
+        
+        drawList.AddCircleFilled(center, radius + 5, backgroundColor);
+        drawList.PathArcTo(center, radius, (float)(Math.PI * 0.5f * (Environment.TickCount / 100 % 4)), (float)(Math.PI * 0.5f * (Environment.TickCount / 100 % 4)) + (float)(Math.PI * 1.5f), 32);
+        drawList.PathStroke(spinnerColor, ImDrawFlags.None, thickness);
+    }
+    
+    /// <summary>
+    /// Reset pagination state and reload listings from the first page
+    /// </summary>
+    private void ResetPaginationAndRefresh()
+    {
+        _currentPageUrl = null;
+        _nextPageUrl = null;
+        _prevPageUrl = null;
+        _totalCount = 0;
+        _currentResponse = null;
+        
+        // Load fresh data from the first page
+        _ = LoadPartyListingsAsync();
     }
 }

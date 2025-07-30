@@ -50,9 +50,12 @@ public class ListingDetailWindow : Window, IDisposable
     private bool _progPointsLoading = false;
     private List<uint>? _cachedProgPoints = null;
     private uint _cachedProgPointsDutyId = 0;
+    
+    // Join party state
+    private bool _isJoining = false;
 
     public ListingDetailWindow(Plugin plugin, PartyListing listing, bool createMode = false) 
-        : base(createMode ? $"Create New Party Listing##create_{listing.Id}" : $"Duty #{listing.CfcId}##{listing.Id}")
+        : base(createMode ? $"Create New Party Listing##create_{listing.Id}" : $"Duty #{listing.CfcId}##detail_{listing.Id}")
     {
         SizeConstraints = new WindowSizeConstraints
         {
@@ -156,6 +159,12 @@ public class ListingDetailWindow : Window, IDisposable
         
         // Draw the duty selector modal
         DutySelectorModal.Draw();
+        
+        // Draw loading spinner overlay if saving or joining
+        if (IsSaving || _isJoining)
+        {
+            DrawLoadingSpinner();
+        }
     }
     
     private void DrawViewMode()
@@ -312,30 +321,74 @@ public class ListingDetailWindow : Window, IDisposable
         
         // Server Information
         ImGui.Text("Datacenter *");
-        var datacenterItems = Datacenters.All.Values.ToArray();
-        var currentDatacenterIndex = Array.IndexOf(datacenterItems, Datacenters.All.GetValueOrDefault(EditDatacenter, EditDatacenter));
-        if (currentDatacenterIndex == -1) currentDatacenterIndex = 0;
-        
-        if (ImGui.Combo("##datacenter", ref currentDatacenterIndex, datacenterItems, datacenterItems.Length))
+        var datacenters = Plugin.WorldService.GetAllDatacenters();
+        var datacenterNames = datacenters.Select(dc => dc.Name.ToString()).ToArray();
+
+        int currentDatacenterIndex = -1;
+        if (!string.IsNullOrEmpty(EditDatacenter))
         {
-            EditDatacenter = Datacenters.All.FirstOrDefault(kvp => kvp.Value == datacenterItems[currentDatacenterIndex]).Key;
-        }
-        
-        ImGui.Text("World *");
-        if (Datacenters.Worlds.TryGetValue(EditDatacenter, out var worlds))
-        {
-            var worldItems = worlds.ToArray();
-            var currentWorldIndex = Array.IndexOf(worldItems, EditWorld);
-            if (currentWorldIndex == -1) currentWorldIndex = 0;
-            
-            if (ImGui.Combo("##world", ref currentWorldIndex, worldItems, worldItems.Length))
+            var currentDc = Plugin.WorldService.GetDatacenterByName(EditDatacenter);
+            if (currentDc.HasValue)
             {
-                EditWorld = worldItems[currentWorldIndex];
+                currentDatacenterIndex = Array.FindIndex(datacenters, dc => dc.RowId == currentDc.Value.RowId);
+            }
+        }
+
+        if (ImGui.Combo("##datacenter", ref currentDatacenterIndex, datacenterNames, datacenterNames.Length))
+        {
+            if (currentDatacenterIndex >= 0 && currentDatacenterIndex < datacenters.Length)
+            {
+                var selectedDatacenter = datacenters[currentDatacenterIndex];
+                var newApiDcName = Plugin.WorldService.GetApiDatacenterName(selectedDatacenter.Name.ToString());
+
+                if (EditDatacenter != newApiDcName)
+                {
+                    EditDatacenter = newApiDcName;
+                    var worldsForNewDc = Plugin.WorldService.GetWorldsForDatacenter(selectedDatacenter.RowId);
+                    var firstWorld = worldsForNewDc.FirstOrDefault();
+                    EditWorld = !firstWorld.Equals(default(World)) ? firstWorld.Name.ToString() : "";
+                }
+            }
+        }
+
+        ImGui.Text("World *");
+        var selectedDcInfo = Plugin.WorldService.GetDatacenterByName(EditDatacenter);
+
+        if (selectedDcInfo.HasValue)
+        {
+            var worlds = Plugin.WorldService.GetWorldsForDatacenter(selectedDcInfo.Value.RowId);
+            var worldNames = worlds.Select(w => w.Name.ToString()).ToArray();
+
+            if (worldNames.Length > 0)
+            {
+                int currentWorldIndex = Array.IndexOf(worldNames, EditWorld);
+                if (currentWorldIndex == -1)
+                {
+                    EditWorld = worldNames.FirstOrDefault() ?? "";
+                    currentWorldIndex = 0;
+                }
+
+                if (ImGui.Combo("##world", ref currentWorldIndex, worldNames, worldNames.Length))
+                {
+                    if (currentWorldIndex >= 0 && currentWorldIndex < worldNames.Length)
+                    {
+                        EditWorld = worldNames[currentWorldIndex];
+                    }
+                }
+            }
+            else
+            {
+                ImGui.TextDisabled("No public worlds for this datacenter.");
+                EditWorld = "";
             }
         }
         else
         {
-            ImGui.InputText("##world", ref EditWorld, 50);
+            ImGui.BeginDisabled();
+            string[] preview = { "Select a datacenter first" };
+            int previewIndex = 0;
+            ImGui.Combo("##world", ref previewIndex, preview, preview.Length);
+            ImGui.EndDisabled();
         }
         
         // Party Finder Code
@@ -564,10 +617,18 @@ public class ListingDetailWindow : Window, IDisposable
         else
         {
             // View mode buttons
-            if (!IsCreateMode && ImGui.Button("Join Party") && Listing.IsActive)
+            if (!IsCreateMode && Listing.IsActive)
             {
-                // Handle join party action
-                // Plugin.JoinParty(Listing.Id);
+                if (_isJoining)
+                {
+                    ImGui.BeginDisabled();
+                    ImGui.Button("Joining...");
+                    ImGui.EndDisabled();
+                }
+                else if (ImGui.Button("Join Party"))
+                {
+                    _ = JoinPartyAsync();
+                }
             }
             
             if (!IsCreateMode)
@@ -726,6 +787,7 @@ public class ListingDetailWindow : Window, IDisposable
     
     /// <summary>
     /// Parse progress points from string format for backward compatibility
+    /// Handles both numeric IDs and textual names (split by comma, strip non-digits, map via ActionNameService when possible)
     /// </summary>
     private List<uint> ParseProgPointFromString(string progPointStr)
     {
@@ -733,13 +795,47 @@ public class ListingDetailWindow : Window, IDisposable
         if (string.IsNullOrWhiteSpace(progPointStr))
             return progPoints;
         
-        // Try to parse as comma-separated list of IDs first
+        // Split by comma and process each part
         var parts = progPointStr.Split(',', StringSplitOptions.RemoveEmptyEntries);
         foreach (var part in parts)
         {
-            if (uint.TryParse(part.Trim(), out var actionId))
+            var trimmedPart = part.Trim();
+            
+            // First try to parse as numeric ID directly
+            if (uint.TryParse(trimmedPart, out var actionId))
             {
                 progPoints.Add(actionId);
+                continue;
+            }
+            
+            // If not numeric, try to handle textual names
+            // Strip non-digits to see if there's a numeric part
+            var digitsOnly = new string(trimmedPart.Where(char.IsDigit).ToArray());
+            if (!string.IsNullOrEmpty(digitsOnly) && uint.TryParse(digitsOnly, out var extractedId))
+            {
+                progPoints.Add(extractedId);
+                continue;
+            }
+            
+            // If we can't extract a numeric ID, try to map via ActionNameService
+            // This is a reverse lookup - search for actions that match the name
+            try
+            {
+                var matchingActions = Plugin.ActionNameService.SearchByName(trimmedPart).ToList();
+                if (matchingActions.Count > 0)
+                {
+                    // Take the first match
+                    progPoints.Add(matchingActions.First().id);
+                }
+                else
+                {
+                    // If no match found, log it for debugging but don't fail
+                    Svc.Log.Debug($"Could not resolve progress point name '{trimmedPart}' to action ID");
+                }
+            }
+            catch (Exception ex)
+            {
+                Svc.Log.Error($"Error resolving progress point name '{trimmedPart}': {ex.Message}");
             }
         }
         
@@ -900,6 +996,73 @@ public class ListingDetailWindow : Window, IDisposable
     }
     
     /// <summary>
+    /// Join the party listing asynchronously
+    /// </summary>
+    private async Task JoinPartyAsync()
+    {
+        if (_isJoining)
+            return;
+            
+        _isJoining = true;
+        
+        try
+        {
+            Svc.Log.Info($"Attempting to join party listing {Listing.Id}");
+            
+            var joinResult = await Plugin.ApiService.JoinListingAsync(Listing.Id);
+            
+            if (joinResult != null && joinResult.Success)
+            {
+                Svc.Log.Info($"Successfully joined party: {joinResult.Message}");
+                
+                // Show success message via chat
+                Svc.Chat.Print($"[Party Finder Reborn] {joinResult.Message}");
+                
+                // If pf_code is present, copy it to clipboard and show toast
+                if (!string.IsNullOrEmpty(joinResult.PfCode))
+                {
+                    try
+                    {
+                        ImGui.SetClipboardText(joinResult.PfCode);
+                        Svc.Chat.Print($"[Party Finder Reborn] Party Finder code '{joinResult.PfCode}' copied to clipboard!");
+                        Svc.Log.Info($"Copied PF code to clipboard: {joinResult.PfCode}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Svc.Log.Error($"Failed to copy PF code to clipboard: {ex.Message}");
+                        Svc.Chat.PrintError($"[Party Finder Reborn] Failed to copy PF code to clipboard. PF Code: {joinResult.PfCode}");
+                    }
+                }
+                
+                // Update local listing status if party is now full
+                if (joinResult.PartyFull)
+                {
+                    Listing.Status = "full";
+                    Svc.Log.Info("Party is now full, updated local status");
+                }
+                
+                // Close the window after successful join
+                IsOpen = false;
+            }
+            else
+            {
+                var errorMessage = joinResult?.Message ?? "Unknown error occurred while joining party";
+                Svc.Log.Error($"Failed to join party: {errorMessage}");
+                Svc.Chat.PrintError($"[Party Finder Reborn] Failed to join party: {errorMessage}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Error joining party: {ex.Message}");
+            Svc.Chat.PrintError($"[Party Finder Reborn] Error joining party: {ex.Message}");
+        }
+        finally
+        {
+            _isJoining = false;
+        }
+    }
+    
+    /// <summary>
     /// Draw the Progress Points (Boss Abilities) section with multi-select interface
     /// </summary>
     private void DrawProgressPointsSection()
@@ -981,5 +1144,19 @@ public class ListingDetailWindow : Window, IDisposable
             Svc.Log.Error($"Error drawing progress points section: {ex.Message}");
             ImGui.TextColored(new Vector4(1, 0, 0, 1), "Error loading progress points");
         }
+    }
+    
+    private void DrawLoadingSpinner()
+    {
+        var center = ImGui.GetIO().DisplaySize / 2;
+        var drawList = ImGui.GetForegroundDrawList();
+        var spinnerColor = ImGui.GetColorU32(ImGuiCol.ButtonHovered);
+        var backgroundColor = ImGui.GetColorU32(ImGuiCol.FrameBg, 0.7f);
+        var radius = 30;
+        var thickness = 5;
+        
+        drawList.AddCircleFilled(center, radius + 5, backgroundColor);
+        drawList.PathArcTo(center, radius, (float)(Math.PI * 0.5f * (Environment.TickCount / 100 % 4)), (float)(Math.PI * 0.5f * (Environment.TickCount / 100 % 4)) + (float)(Math.PI * 1.5f), 32);
+        drawList.PathStroke(spinnerColor, ImDrawFlags.None, thickness);
     }
 }

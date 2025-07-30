@@ -84,21 +84,35 @@ public class PartyFinderApiService : IDisposable
     }
     
     /// <summary>
-    /// Get party listings with optional filters
+    /// Get party listings with optional filters and pagination
     /// </summary>
-    public async Task<ApiResponse<PartyListing>?> GetListingsAsync(ListingFilters? filters = null)
+    /// <param name="filters">Optional filters to apply</param>
+    /// <param name="pageUrl">Optional specific page URL to fetch</param>
+    /// <returns>API response containing listings and pagination info</returns>
+    public async Task<ApiResponse<PartyListing>?> GetListingsAsync(ListingFilters? filters = null, string? pageUrl = null)
     {
         try
         {
-            var url = $"{Constants.ApiBaseUrl}/api/v1/listings/";
+            string url;
             
-            if (filters != null)
+            if (!string.IsNullOrEmpty(pageUrl))
             {
-                var queryParams = filters.ToQueryParameters();
-                if (queryParams.Count > 0)
+                // Use the provided page URL directly
+                url = pageUrl;
+            }
+            else
+            {
+                // Build URL from base URL and filters
+                url = $"{Constants.ApiBaseUrl}/api/v1/listings/";
+                
+                if (filters != null)
                 {
-                    var queryString = string.Join("&", queryParams.Select(kvp => $"{kvp.Key}={Uri.EscapeDataString(kvp.Value)}"));
-                    url += "?" + queryString;
+                    var queryParams = filters.ToQueryParameters();
+                    if (queryParams.Count > 0)
+                    {
+                        var queryString = string.Join("&", queryParams.Select(kvp => $"{kvp.Key}={Uri.EscapeDataString(kvp.Value)}"));
+                        url += "?" + queryString;
+                    }
                 }
             }
             
@@ -144,6 +158,59 @@ public class PartyFinderApiService : IDisposable
     }
     
 
+    /// <summary>
+    /// Get listings from a specific page URL (for pagination navigation)
+    /// </summary>
+    /// <param name="url">The exact URL to fetch (from Next/Previous links)</param>
+    /// <returns>API response containing listings and pagination info</returns>
+    public async Task<ApiResponse<PartyListing>?> GetListingsPageAsync(string url)
+    {
+        if (string.IsNullOrEmpty(url))
+            return null;
+            
+        try
+        {
+            var response = await _httpClient.GetAsync(url);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadAsStringAsync();
+                
+                // Try deserializing as ApiResponse first
+                try
+                {
+                    var apiResponse = JsonConvert.DeserializeObject<ApiResponse<PartyListing>>(json);
+                    if (apiResponse != null && apiResponse.Results != null)
+                        return apiResponse;
+                }
+                catch (JsonSerializationException)
+                {
+                    // Fall back to plain array
+                }
+                
+                // Otherwise, try deserializing as a plain list
+                try
+                {
+                    var plainList = JsonConvert.DeserializeObject<List<PartyListing>>(json);
+                    if (plainList != null)
+                        return new ApiResponse<PartyListing> { Results = plainList, Count = plainList.Count };
+                }
+                catch (JsonSerializationException)
+                {
+                    Svc.Log.Error($"Failed to deserialize listings page response: {json}");
+                }
+            }
+            
+            Svc.Log.Warning($"Failed to get listings page: {response.StatusCode}");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Error getting listings page: {ex.Message}");
+            return null;
+        }
+    }
+    
     /// <summary>
     /// Get popular tags
     /// </summary>
@@ -262,6 +329,51 @@ public class PartyFinderApiService : IDisposable
         {
             Svc.Log.Error($"Error deleting listing {id}: {ex.Message}");
             return false;
+        }
+    }
+    
+    /// <summary>
+    /// Join a party listing
+    /// For now, this is mocked to return success = true for UI testing
+    /// </summary>
+    public async Task<JoinResult?> JoinListingAsync(string id)
+    {
+        try
+        {
+            // TODO: Replace with actual API call when endpoint is available
+            // var response = await _httpClient.PostAsync($"{Constants.ApiBaseUrl}/api/v1/listings/{id}/join/", null);
+            
+            // For now, mock a successful response to test the UI workflow
+            await Task.Delay(1000); // Simulate network delay
+            
+            var mockResult = new JoinResult
+            {
+                Success = true,
+                Message = "Successfully joined the party!",
+                PfCode = "1234", // Mock PF code for clipboard testing
+                PartyFull = false // Could be randomized for testing
+            };
+            
+            Svc.Log.Info($"Mock: Successfully 'joined' party listing {id}");
+            return mockResult;
+            
+            // TODO: Uncomment when real endpoint is available
+            /*
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadAsStringAsync();
+                var result = JsonConvert.DeserializeObject<JoinResult>(json);
+                return result;
+            }
+            
+            Svc.Log.Warning($"Failed to join listing {id}: {response.StatusCode}");
+            return null;
+            */
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Error joining listing {id}: {ex.Message}");
+            return null;
         }
     }
     

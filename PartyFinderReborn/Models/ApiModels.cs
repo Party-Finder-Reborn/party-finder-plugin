@@ -218,12 +218,22 @@ public class PartyListing
         {
             var requirements = new List<string>();
             
-            if (MinItemLevel > 0)
+            // Include Min/Max ilvl even when MaxItemLevel < MinItemLevel
+            if (MinItemLevel > 0 || MaxItemLevel > 0)
             {
-                if (MaxItemLevel > 0)
+                if (MinItemLevel > 0 && MaxItemLevel > 0)
+                {
+                    // Always show both values when both are set, regardless of which is larger
                     requirements.Add($"ilvl {MinItemLevel}-{MaxItemLevel}");
-                else
+                }
+                else if (MinItemLevel > 0)
+                {
                     requirements.Add($"ilvl {MinItemLevel}+");
+                }
+                else if (MaxItemLevel > 0)
+                {
+                    requirements.Add($"ilvl 0-{MaxItemLevel}");
+                }
             }
             
             if (!string.IsNullOrEmpty(ProgPoint))
@@ -381,6 +391,24 @@ public static class Datacenters
         ["mana"] = new() { "Anima", "Asura", "Chocobo", "Hades", "Ixion", "Masamune", "Pandaemonium", "Titan" },
         ["meteor"] = new() { "Belias", "Mandragora", "Ramuh", "Shinryu", "Unicorn", "Valefor", "Yojimbo", "Zeromus" }
     };
+}
+
+/// <summary>
+/// Result of joining a party listing
+/// </summary>
+public class JoinResult
+{
+    [JsonProperty("success")]
+    public bool Success { get; set; }
+    
+    [JsonProperty("message")]
+    public string Message { get; set; } = string.Empty;
+    
+    [JsonProperty("pf_code")]
+    public string? PfCode { get; set; }
+    
+    [JsonProperty("party_full")]
+    public bool PartyFull { get; set; }
 }
 
 /// <summary>
