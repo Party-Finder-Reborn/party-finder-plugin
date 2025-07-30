@@ -267,6 +267,7 @@ public class PartyFinderApiService : IDisposable
         try
         {
             var json = JsonConvert.SerializeObject(listing);
+            Svc.Log.Debug($"Creating listing with data: {json}");
             var content = new StringContent(json, Encoding.UTF8, "application/json");
             
             var response = await _httpClient.PostAsync($"{Constants.ApiBaseUrl}/api/v1/listings/", content);
@@ -274,10 +275,19 @@ public class PartyFinderApiService : IDisposable
             if (response.IsSuccessStatusCode)
             {
                 var responseJson = await response.Content.ReadAsStringAsync();
-                return JsonConvert.DeserializeObject<PartyListing>(responseJson);
+                Svc.Log.Debug($"Create listing API response: {responseJson}");
+                var result = JsonConvert.DeserializeObject<PartyListing>(responseJson);
+                if (result != null)
+                {
+                    Svc.Log.Debug($"Deserialized listing - ID: {result.Id}, CurrentSize: {result.CurrentSize}, Participants: [{string.Join(", ", result.Participants)}]");
+                }
+                return result;
             }
             
+            // Log detailed error information
+            var errorContent = await response.Content.ReadAsStringAsync();
             Svc.Log.Warning($"Failed to create listing: {response.StatusCode}");
+            Svc.Log.Warning($"Error details: {errorContent}");
             return null;
         }
         catch (Exception ex)
@@ -295,6 +305,7 @@ public class PartyFinderApiService : IDisposable
         try
         {
             var json = JsonConvert.SerializeObject(listing);
+            Svc.Log.Debug($"Updating listing {id} with data: {json}");
             var content = new StringContent(json, Encoding.UTF8, "application/json");
             
             var response = await _httpClient.PutAsync($"{Constants.ApiBaseUrl}/api/v1/listings/{id}/", content);
@@ -302,10 +313,19 @@ public class PartyFinderApiService : IDisposable
             if (response.IsSuccessStatusCode)
             {
                 var responseJson = await response.Content.ReadAsStringAsync();
-                return JsonConvert.DeserializeObject<PartyListing>(responseJson);
+                Svc.Log.Debug($"Update listing API response: {responseJson}");
+                var result = JsonConvert.DeserializeObject<PartyListing>(responseJson);
+                if (result != null)
+                {
+                    Svc.Log.Debug($"Deserialized updated listing - ID: {result.Id}, CurrentSize: {result.CurrentSize}, Participants: [{string.Join(", ", result.Participants)}]");
+                }
+                return result;
             }
             
+            // Log detailed error information
+            var errorContent = await response.Content.ReadAsStringAsync();
             Svc.Log.Warning($"Failed to update listing {id}: {response.StatusCode}");
+            Svc.Log.Warning($"Error details: {errorContent}");
             return null;
         }
         catch (Exception ex)
@@ -333,32 +353,14 @@ public class PartyFinderApiService : IDisposable
     }
     
     /// <summary>
-    /// Join a party listing
-    /// For now, this is mocked to return success = true for UI testing
+    /// Join a party listing.
     /// </summary>
     public async Task<JoinResult?> JoinListingAsync(string id)
     {
         try
         {
-            // TODO: Replace with actual API call when endpoint is available
-            // var response = await _httpClient.PostAsync($"{Constants.ApiBaseUrl}/api/v1/listings/{id}/join/", null);
+            var response = await _httpClient.PostAsync($"{Constants.ApiBaseUrl}/api/v1/listings/{id}/join/", null);
             
-            // For now, mock a successful response to test the UI workflow
-            await Task.Delay(1000); // Simulate network delay
-            
-            var mockResult = new JoinResult
-            {
-                Success = true,
-                Message = "Successfully joined the party!",
-                PfCode = "1234", // Mock PF code for clipboard testing
-                PartyFull = false // Could be randomized for testing
-            };
-            
-            Svc.Log.Info($"Mock: Successfully 'joined' party listing {id}");
-            return mockResult;
-            
-            // TODO: Uncomment when real endpoint is available
-            /*
             if (response.IsSuccessStatusCode)
             {
                 var json = await response.Content.ReadAsStringAsync();
@@ -366,14 +368,48 @@ public class PartyFinderApiService : IDisposable
                 return result;
             }
             
+            if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
+            {
+                var json = await response.Content.ReadAsStringAsync();
+                var result = JsonConvert.DeserializeObject<JoinResult>(json);
+                if (result != null) {
+                    return result;
+                }
+            }
+
             Svc.Log.Warning($"Failed to join listing {id}: {response.StatusCode}");
-            return null;
-            */
+            return new JoinResult { Success = false, Message = $"Failed to join party. Status code: {response.StatusCode}" };
         }
         catch (Exception ex)
         {
             Svc.Log.Error($"Error joining listing {id}: {ex.Message}");
-            return null;
+            return new JoinResult { Success = false, Message = "An unexpected error occurred." };
+        }
+    }
+    
+    /// <summary>
+    /// Leave a party listing.
+    /// </summary>
+    public async Task<JoinResult?> LeaveListingAsync(string id)
+    {
+        try
+        {
+            var response = await _httpClient.PostAsync($"{Constants.ApiBaseUrl}/api/v1/listings/{id}/leave/", null);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadAsStringAsync();
+                var result = JsonConvert.DeserializeObject<JoinResult>(json);
+                return result;
+            }
+
+            Svc.Log.Warning($"Failed to leave listing {id}: {response.StatusCode}");
+            return new JoinResult { Success = false, Message = $"Failed to leave party. Status code: {response.StatusCode}" };
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Error leaving listing {id}: {ex.Message}");
+            return new JoinResult { Success = false, Message = "An unexpected error occurred." };
         }
     }
     

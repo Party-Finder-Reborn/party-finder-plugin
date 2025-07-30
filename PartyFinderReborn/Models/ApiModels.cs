@@ -144,6 +144,21 @@ public class PartyListing
     [JsonProperty("updated_at")]
     public DateTime UpdatedAt { get; set; }
     
+    [JsonProperty("current_size")]
+    public int CurrentSize { get; set; }
+    
+    [JsonProperty("max_size")]
+    public int MaxSize { get; set; } = 8;
+    
+    [JsonProperty("participants")]
+    public List<string> Participants { get; set; } = new();
+    
+    [JsonProperty("is_owner")]
+    public bool IsOwner { get; set; }
+    
+    [JsonProperty("has_joined")]
+    public bool HasJoined { get; set; }
+    
     // Computed properties
     public bool IsActive => Status == "active";
     public string TagsDisplay => string.Join(", ", UserTags);
@@ -409,6 +424,12 @@ public class JoinResult
     
     [JsonProperty("party_full")]
     public bool PartyFull { get; set; }
+
+    [JsonProperty("current_size")]
+    public int CurrentSize { get; set; }
+
+    [JsonProperty("max_size")]
+    public int MaxSize { get; set; }
 }
 
 /// <summary>

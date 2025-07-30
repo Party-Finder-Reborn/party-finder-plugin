@@ -293,15 +293,18 @@ public class MainWindow : Window, IDisposable
         // Main content area
         var contentSize = ImGui.GetContentRegionAvail();
         
-        // Filters on the left
-        ImGui.BeginChild("FiltersPanel##filters", new Vector2(250, contentSize.Y), true);
+        // Calculate filter panel width - smaller and properly sized
+        var filterPanelWidth = Math.Max(200, contentSize.X * 0.2f); // Reduced to 20% with 200px minimum
+        
+        // Filters on the left - no border to prevent clipping issues
+        ImGui.BeginChild("FiltersPanel##filters", new Vector2(filterPanelWidth, contentSize.Y), false);
         DrawFilters();
         ImGui.EndChild();
 
         ImGui.SameLine();
 
         // Party listings table on the right
-        ImGui.BeginChild("ListingsPanel##listings", new Vector2(contentSize.X - 260, contentSize.Y), false);
+        ImGui.BeginChild("ListingsPanel##listings", new Vector2(contentSize.X - filterPanelWidth - 10, contentSize.Y), false);
         
         // Calculate space for pagination at the bottom
         var childContentSize = ImGui.GetContentRegionAvail();
@@ -481,9 +484,8 @@ public class MainWindow : Window, IDisposable
             ImGui.EndListBox();
         }
         
-        // Tag filter entry
+        // Tag filter entry - rearrange to prevent clipping
         ImGui.InputText("Add Filter Tag", ref NewFilterTag, 50);
-        ImGui.SameLine();
         if (ImGui.Button("Add Tag") && !string.IsNullOrWhiteSpace(NewFilterTag) && !CurrentFilters.Tags.Contains(NewFilterTag))
         {
             CurrentFilters.Tags.Add(NewFilterTag);

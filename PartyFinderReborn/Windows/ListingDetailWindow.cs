@@ -51,11 +51,13 @@ public class ListingDetailWindow : Window, IDisposable
     private List<uint>? _cachedProgPoints = null;
     private uint _cachedProgPointsDutyId = 0;
     
-    // Join party state
+    // Join/Leave party state
     private bool _isJoining = false;
+    private bool _isLeaving = false;
+    private bool _isRefreshing = false;
 
     public ListingDetailWindow(Plugin plugin, PartyListing listing, bool createMode = false) 
-        : base(createMode ? $"Create New Party Listing##create_{listing.Id}" : $"Duty #{listing.CfcId}##detail_{listing.Id}")
+        : base(createMode ? $"Create New Party Listing##create_{listing.Id}" : $"{plugin.ContentFinderService.GetDutyDisplayName(listing.CfcId)}##detail_{listing.Id}")
     {
         SizeConstraints = new WindowSizeConstraints
         {
@@ -89,11 +91,11 @@ public class ListingDetailWindow : Window, IDisposable
         EditRequiredClears = new List<uint>(listing.RequiredClears);
         // Initialize EditProgPoint: backward compatibility with string format
         EditProgPoint = ParseProgPointFromString(listing.ProgPoint);
-        EditExperienceLevel = listing.ExperienceLevel;
+        EditExperienceLevel = string.IsNullOrEmpty(listing.ExperienceLevel) ? "fresh" : listing.ExperienceLevel;
         EditRequiredPlugins = new List<string>(listing.RequiredPlugins);
         EditVoiceChatRequired = listing.VoiceChatRequired;
-        EditLootRules = listing.LootRules;
-        EditParseRequirement = listing.ParseRequirement;
+        EditLootRules = string.IsNullOrEmpty(listing.LootRules) ? "need_greed" : listing.LootRules;
+        EditParseRequirement = string.IsNullOrEmpty(listing.ParseRequirement) ? "none" : listing.ParseRequirement;
         EditDatacenter = listing.Datacenter;
         EditWorld = listing.World;
         EditPfCode = listing.PfCode;
@@ -108,6 +110,12 @@ public class ListingDetailWindow : Window, IDisposable
         
         // Load popular tags
         _ = LoadPopularTagsAsync();
+        
+        // Auto-refresh existing listings to ensure all fields are properly populated
+        if (!createMode && !string.IsNullOrEmpty(listing.Id))
+        {
+            _ = RefreshListingAsync();
+        }
     }
 
     public void Dispose() 
@@ -169,10 +177,16 @@ public class ListingDetailWindow : Window, IDisposable
     
     private void DrawViewMode()
     {
-        // Header with basic information
+        // Header with basic information and participant count
         var dutyName = Plugin.ContentFinderService.GetDutyDisplayName(Listing.CfcId);
         ImGui.Text($"Duty: {dutyName}");
         ImGui.Text($"Content Finder ID: {Listing.CfcId}");
+        
+        // Party size with progress bar
+        ImGui.Text($"Party Size: ({Listing.CurrentSize}/{Listing.MaxSize})");
+        var progressRatio = (float)Listing.CurrentSize / Listing.MaxSize;
+        ImGui.ProgressBar(progressRatio, new Vector2(-1, 0), $"{Listing.CurrentSize}/{Listing.MaxSize}");
+        
         ImGui.Text($"Status: {Listing.StatusDisplay}");
         ImGui.Text($"Experience Level: {Listing.ExperienceLevelDisplay}");
         ImGui.Text($"Location: {Listing.LocationDisplay}");
@@ -180,6 +194,30 @@ public class ListingDetailWindow : Window, IDisposable
         if (!string.IsNullOrEmpty(Listing.PfCode))
         {
             ImGui.Text($"Party Finder Code: {Listing.PfCode}");
+        }
+
+        ImGui.Separator();
+
+        // Roster Section
+        ImGui.Text("Party Roster:");
+        if (ImGui.BeginChild("Roster", new Vector2(-1, 100), true))
+        {
+            var localPlayerName = Svc.ClientState.LocalPlayer?.Name?.TextValue ?? "";
+            foreach (var participant in Listing.Participants)
+            {
+                var isLocalPlayer = participant == localPlayerName;
+                if (isLocalPlayer)
+                {
+                    ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 0.0f, 1.0f)); // Highlight local player
+                    ImGui.Text($"• {participant} (You)");
+                    ImGui.PopStyleColor();
+                }
+                else
+                {
+                    ImGui.Text($"• {participant}");
+                }
+            }
+            ImGui.EndChild();
         }
 
         ImGui.Separator();
@@ -619,15 +657,50 @@ public class ListingDetailWindow : Window, IDisposable
             // View mode buttons
             if (!IsCreateMode && Listing.IsActive)
             {
+                var partyFull = Listing.CurrentSize >= Listing.MaxSize;
+                
                 if (_isJoining)
                 {
                     ImGui.BeginDisabled();
                     ImGui.Button("Joining...");
                     ImGui.EndDisabled();
                 }
-                else if (ImGui.Button("Join Party"))
+                else if (_isLeaving)
                 {
-                    _ = JoinPartyAsync();
+                    ImGui.BeginDisabled();
+                    ImGui.Button("Leaving...");
+                    ImGui.EndDisabled();
+                }
+                else if (Listing.IsOwner)
+                {
+                    // User is owner - show Close Listing button
+                    if (ImGui.Button("Close Listing"))
+                    {
+                        _ = CloseListingAsync();
+                    }
+                }
+                else if (Listing.HasJoined)
+                {
+                    // User has joined - show Leave button
+                    if (ImGui.Button("Leave Party"))
+                    {
+                        _ = LeavePartyAsync();
+                    }
+                }
+                else if (!partyFull)
+                {
+                    // Not joined, not owner, not full - show Join button
+                    if (ImGui.Button("Join Party"))
+                    {
+                        _ = JoinPartyAsync();
+                    }
+                }
+                else if (partyFull)
+                {
+                    // Party is full - show disabled Join button
+                    ImGui.BeginDisabled();
+                    ImGui.Button("Party Full");
+                    ImGui.EndDisabled();
                 }
             }
             
@@ -641,10 +714,15 @@ public class ListingDetailWindow : Window, IDisposable
             }
             
             ImGui.SameLine();
-            if (ImGui.Button("Refresh") && !IsCreateMode)
+            if (_isRefreshing)
             {
-                // Handle refresh action
-                // Plugin.RefreshListing(Listing.Id);
+                ImGui.BeginDisabled();
+                ImGui.Button("Refreshing...");
+                ImGui.EndDisabled();
+            }
+            else if (ImGui.Button("Refresh") && !IsCreateMode)
+            {
+                _ = RefreshListingAsync();
             }
             
             ImGui.SameLine();
@@ -764,11 +842,17 @@ public class ListingDetailWindow : Window, IDisposable
             {
                 // Update the current listing with the server response
                 Listing = result;
-                WindowName = $"Duty #{Listing.CfcId}##{Listing.Id}";
+                
+                // Update SelectedDuty to match the listing's CfcId
+                SelectedDuty = Plugin.ContentFinderService.GetContentFinderCondition(Listing.CfcId);
+                
+                var dutyName = Plugin.ContentFinderService.GetDutyDisplayName(Listing.CfcId);
+                WindowName = $"{dutyName}##detail_{Listing.Id}";
                 IsEditing = false;
+                var wasCreateMode = IsCreateMode;
                 IsCreateMode = false;
                 
-                Svc.Log.Info($"Successfully {(IsCreateMode ? "created" : "updated")} listing for duty #{Listing.CfcId}");
+                Svc.Log.Info($"Successfully {(wasCreateMode ? "created" : "updated")} listing for duty {dutyName} (ID: {Listing.Id}, CurrentSize: {Listing.CurrentSize})");
             }
             else
             {
@@ -1041,6 +1125,9 @@ public class ListingDetailWindow : Window, IDisposable
                     Svc.Log.Info("Party is now full, updated local status");
                 }
                 
+                // Refresh the listing to get updated participant info
+                await RefreshListingAsync();
+                
                 // Close the window after successful join
                 IsOpen = false;
             }
@@ -1059,6 +1146,129 @@ public class ListingDetailWindow : Window, IDisposable
         finally
         {
             _isJoining = false;
+        }
+    }
+    
+    /// <summary>
+    /// Leave the party listing asynchronously
+    /// </summary>
+    private async Task LeavePartyAsync()
+    {
+        if (_isLeaving)
+            return;
+            
+        _isLeaving = true;
+        
+        try
+        {
+            Svc.Log.Info($"Attempting to leave party listing {Listing.Id}");
+            
+            var leaveResult = await Plugin.ApiService.LeaveListingAsync(Listing.Id);
+            
+            if (leaveResult != null && leaveResult.Success)
+            {
+                Svc.Log.Info($"Successfully left party: {leaveResult.Message}");
+                
+                // Show success message via chat
+                Svc.Chat.Print($"[Party Finder Reborn] {leaveResult.Message}");
+                
+                // Refresh the listing to get updated participant info
+                await RefreshListingAsync();
+            }
+            else
+            {
+                var errorMessage = leaveResult?.Message ?? "Unknown error occurred while leaving party";
+                Svc.Log.Error($"Failed to leave party: {errorMessage}");
+                Svc.Chat.PrintError($"[Party Finder Reborn] Failed to leave party: {errorMessage}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Error leaving party: {ex.Message}");
+            Svc.Chat.PrintError($"[Party Finder Reborn] Error leaving party: {ex.Message}");
+        }
+        finally
+        {
+            _isLeaving = false;
+        }
+    }
+    
+    /// <summary>
+    /// Close (delete) the listing as the owner
+    /// </summary>
+    private async Task CloseListingAsync()
+    {
+        if (IsSaving) return;
+        IsSaving = true;
+
+        try
+        {
+            Svc.Log.Info($"Closing party listing {Listing.Id}");
+            var success = await Plugin.ApiService.DeleteListingAsync(Listing.Id);
+
+            if (success)
+            {
+                Svc.Log.Info($"Successfully closed listing {Listing.Id}");
+                Svc.Chat.Print("[Party Finder Reborn] Your party listing has been closed.");
+                IsOpen = false; // Close the window after successful deletion
+            }
+            else
+            {
+                Svc.Log.Error($"Failed to close listing {Listing.Id}");
+                Svc.Chat.PrintError("[Party Finder Reborn] Failed to close your party listing.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Error closing listing: {ex.Message}");
+            Svc.Chat.PrintError($"[Party Finder Reborn] An error occurred while closing your listing.");
+        }
+        finally
+        {
+            IsSaving = false;
+        }
+    }
+    
+    /// <summary>
+    /// Refresh the listing data from the server
+    /// </summary>
+    private async Task RefreshListingAsync()
+    {
+        if (_isRefreshing)
+            return;
+            
+        _isRefreshing = true;
+        
+        try
+        {
+            Svc.Log.Info($"Refreshing party listing {Listing.Id}");
+            
+            var refreshedListing = await Plugin.ApiService.GetListingAsync(Listing.Id);
+            
+            if (refreshedListing != null)
+            {
+                // Update the current listing with fresh data from server
+                Listing = refreshedListing;
+                
+                // Update SelectedDuty to match the refreshed listing's CfcId
+                SelectedDuty = Plugin.ContentFinderService.GetContentFinderCondition(Listing.CfcId);
+                
+                Svc.Log.Info($"Successfully refreshed listing for duty #{Listing.CfcId} (ID: {Listing.Id}, CurrentSize: {Listing.CurrentSize})");
+            }
+            else
+            {
+                Svc.Log.Warning($"Failed to refresh listing {Listing.Id} - listing may no longer exist");
+                Svc.Chat.PrintError($"[Party Finder Reborn] Failed to refresh listing - it may no longer exist");
+            }
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Error refreshing listing: {ex.Message}");
+            Svc.Chat.PrintError($"[Party Finder Reborn] Error refreshing listing: {ex.Message}");
+        }
+        finally
+        {
+            _isRefreshing = false;
         }
     }
     
