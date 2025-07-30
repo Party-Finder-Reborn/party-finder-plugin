@@ -388,6 +388,45 @@ public class PartyFinderApiService : IDisposable
     }
     
     /// <summary>
+    /// Join a party listing with a specified role.
+    /// </summary>
+    public async Task<JoinResult?> JoinListingWithRoleAsync(string id, string role)
+    {
+        try
+        {
+            var requestData = new { role = role };
+            var json = JsonConvert.SerializeObject(requestData);
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            
+            var response = await _httpClient.PostAsync($"{Constants.ApiBaseUrl}/api/v1/listings/{id}/join/", content);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var responseJson = await response.Content.ReadAsStringAsync();
+                var result = JsonConvert.DeserializeObject<JoinResult>(responseJson);
+                return result;
+            }
+            
+            if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
+            {
+                var responseJson = await response.Content.ReadAsStringAsync();
+                var result = JsonConvert.DeserializeObject<JoinResult>(responseJson);
+                if (result != null) {
+                    return result;
+                }
+            }
+
+            Svc.Log.Warning($"Failed to join listing {id} with role {role}: {response.StatusCode}");
+            return new JoinResult { Success = false, Message = $"Failed to join party. Status code: {response.StatusCode}" };
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Error joining listing {id} with role {role}: {ex.Message}");
+            return new JoinResult { Success = false, Message = "An unexpected error occurred." };
+        }
+    }
+    
+    /// <summary>
     /// Leave a party listing.
     /// </summary>
     public async Task<JoinResult?> LeaveListingAsync(string id)
@@ -413,6 +452,97 @@ public class PartyFinderApiService : IDisposable
         }
     }
     
+    /// <summary>
+    /// Send an invitation request to join a party listing.
+    /// </summary>
+    public async Task<InvitationResponse?> SendInvitationAsync(string listingId, string message, string characterName, string characterWorld)
+    {
+        try
+        {
+            var requestData = new
+            {
+                listing_id = listingId,
+                message = message,
+                character_name = characterName,
+                character_world = characterWorld
+            };
+            
+            var json = JsonConvert.SerializeObject(requestData);
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            
+            var response = await _httpClient.PostAsync($"{Constants.ApiBaseUrl}/api/v1/invitations/send/", content);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var responseJson = await response.Content.ReadAsStringAsync();
+                return JsonConvert.DeserializeObject<InvitationResponse>(responseJson);
+            }
+            
+            var errorContent = await response.Content.ReadAsStringAsync();
+            Svc.Log.Warning($"Failed to send invitation: {response.StatusCode} - {errorContent}");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Error sending invitation: {ex.Message}");
+            return null;
+        }
+    }
+    
+    /// <summary>
+    /// Get pending invitation notifications for party creators.
+    /// </summary>
+    public async Task<NotificationsResponse?> GetNotificationsAsync(long? since = null, string? listingId = null)
+    {
+        try
+        {
+            var url = $"{Constants.ApiBaseUrl}/api/v1/invitations/notifications/";
+            var queryParams = new List<string>();
+            
+            if (since.HasValue)
+                queryParams.Add($"since={since.Value}");
+            
+            if (!string.IsNullOrEmpty(listingId))
+                queryParams.Add($"listing_id={listingId}");
+            
+            if (queryParams.Count > 0)
+                url += "?" + string.Join("&", queryParams);
+            
+            var response = await _httpClient.GetAsync(url);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadAsStringAsync();
+                return JsonConvert.DeserializeObject<NotificationsResponse>(json);
+            }
+            
+            Svc.Log.Warning($"Failed to get notifications: {response.StatusCode}");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Error getting notifications: {ex.Message}");
+            return null;
+        }
+    }
+    
+    /// <summary>
+    /// Dismiss an invitation.
+    /// </summary>
+    public async Task<bool> DismissInvitationAsync(string invitationId)
+    {
+        try
+        {
+            var response = await _httpClient.DeleteAsync($"{Constants.ApiBaseUrl}/api/v1/invitations/{invitationId}/dismiss/");
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Error dismissing invitation {invitationId}: {ex.Message}");
+            return false;
+        }
+    }
+
     public void Dispose()
     {
         _httpClient?.Dispose();

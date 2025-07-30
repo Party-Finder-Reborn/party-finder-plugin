@@ -70,6 +70,17 @@ public class UserProfile
     }
 }
 
+/// <summary>
+/// Participant information with role
+/// </summary>
+public class ParticipantInfo
+{
+    [JsonProperty("name")]
+    public string Name { get; set; } = string.Empty;
+    
+    [JsonProperty("role")]
+    public string Role { get; set; } = string.Empty;
+}
 
 /// <summary>
 /// Party listing information
@@ -151,13 +162,22 @@ public class PartyListing
     public int MaxSize { get; set; } = 8;
     
     [JsonProperty("participants")]
-    public List<string> Participants { get; set; } = new();
+    public List<ParticipantInfo> Participants { get; set; } = new();
     
     [JsonProperty("is_owner")]
     public bool IsOwner { get; set; }
     
     [JsonProperty("has_joined")]
     public bool HasJoined { get; set; }
+    
+    [JsonProperty("creator_username")]
+    public string CreatorUsername { get; set; } = string.Empty;
+    
+    [JsonProperty("creator_display_name")]
+    public string CreatorDisplayName { get; set; } = string.Empty;
+    
+    [JsonProperty("creator_role")]
+    public string CreatorRole { get; set; } = string.Empty;
     
     // Computed properties
     public bool IsActive => Status == "active";
@@ -225,7 +245,9 @@ public class PartyListing
         _ => Datacenter
     };
     
-    public string CreatorDisplay => Creator?.DisplayName ?? "Unknown";
+    public string CreatorDisplay => !string.IsNullOrEmpty(CreatorDisplayName) ? CreatorDisplayName :
+                                     (!string.IsNullOrEmpty(CreatorUsername) ? CreatorUsername :
+                                     (Creator?.DisplayName ?? "Unknown"));
     
     public string RequirementsDisplay
     {
@@ -315,6 +337,7 @@ public class ListingFilters
     public string? Status { get; set; }
     public List<string> Tags { get; set; } = new();
     public bool? RpFlag { get; set; }
+    public bool? IsOwner { get; set; }
     public string? Ordering { get; set; } = "-created_at";
     
     public Dictionary<string, string> ToQueryParameters()
@@ -336,6 +359,9 @@ public class ListingFilters
         if (RpFlag.HasValue)
             parameters["rp_flag"] = RpFlag.Value.ToString().ToLower();
         
+        if (IsOwner.HasValue)
+            parameters["is_owner"] = IsOwner.Value.ToString().ToLower();
+        
         if (!string.IsNullOrEmpty(Ordering))
             parameters["ordering"] = Ordering;
         
@@ -354,6 +380,7 @@ public class ListingFilters
         Status = null;
         Tags.Clear();
         RpFlag = null;
+        IsOwner = null;
         Ordering = "-created_at";
     }
 }
@@ -435,6 +462,76 @@ public class JoinResult
 /// <summary>
 /// Available party statuses
 /// </summary>
+/// <summary>
+/// Response from sending an invitation
+/// </summary>
+public class InvitationResponse
+{
+    [JsonProperty("success")]
+    public bool Success { get; set; }
+    
+    [JsonProperty("invitation_id")]
+    public string InvitationId { get; set; } = string.Empty;
+    
+    [JsonProperty("message")]
+    public string Message { get; set; } = string.Empty;
+    
+    [JsonProperty("expires_at")]
+    public DateTime ExpiresAt { get; set; }
+}
+
+/// <summary>
+/// Invitation notification data
+/// </summary>
+public class InvitationNotification
+{
+    [JsonProperty("id")]
+    public string Id { get; set; } = string.Empty;
+    
+    [JsonProperty("listing_id")]
+    public string ListingId { get; set; } = string.Empty;
+    
+    [JsonProperty("requester")]
+    public UserProfile Requester { get; set; } = new();
+    
+    [JsonProperty("message")]
+    public string Message { get; set; } = string.Empty;
+    
+    [JsonProperty("character_name")]
+    public string? CharacterName { get; set; }
+    
+    [JsonProperty("character_world")]
+    public string? CharacterWorld { get; set; }
+    
+    [JsonProperty("created_at")]
+    public DateTime CreatedAt { get; set; }
+    
+    [JsonProperty("expires_at")]
+    public DateTime ExpiresAt { get; set; }
+    
+    [JsonProperty("expired")]
+    public bool? Expired { get; set; }
+    
+    public string CharacterDisplay => !string.IsNullOrEmpty(CharacterName) 
+        ? $"{CharacterName}@{CharacterWorld ?? "Unknown"}"
+        : "Character info expired";
+}
+
+/// <summary>
+/// Response from getting notifications
+/// </summary>
+public class NotificationsResponse
+{
+    [JsonProperty("notifications")]
+    public List<InvitationNotification> Notifications { get; set; } = new();
+    
+    [JsonProperty("has_new")]
+    public bool HasNew { get; set; }
+    
+    [JsonProperty("last_updated")]
+    public long LastUpdated { get; set; }
+}
+
 public static class PartyStatuses
 {
     public static readonly Dictionary<string, string> All = new()

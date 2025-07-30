@@ -20,12 +20,11 @@ public class MainWindow : Window, IDisposable
     private bool IsLoading;
     private string ConnectionStatus;
     private DateTime LastRefresh;
-    private Dictionary<string, ListingDetailWindow> OpenDetailWindows;
+    private Dictionary<string, BaseListingWindow> OpenDetailWindows;
     private List<PopularItem> PopularTags;
     private string NewFilterTag;
     
     // Pagination state
-    private string? _currentPageUrl;
     private string? _nextPageUrl;
     private string? _prevPageUrl;
     private int _totalCount;
@@ -46,7 +45,7 @@ public class MainWindow : Window, IDisposable
         IsLoading = false;
         ConnectionStatus = "Disconnected";
         LastRefresh = DateTime.MinValue;
-        OpenDetailWindows = new Dictionary<string, ListingDetailWindow>();
+        OpenDetailWindows = new Dictionary<string, BaseListingWindow>();
         PopularTags = new List<PopularItem>();
         NewFilterTag = "";
 
@@ -150,6 +149,10 @@ public class MainWindow : Window, IDisposable
             if (CurrentFilters.RpFlag.HasValue && listing.IsRoleplay != CurrentFilters.RpFlag.Value)
                 return false;
 
+            // Owner filter - only show listings where user is owner
+            if (CurrentFilters.IsOwner.HasValue && listing.IsOwner != CurrentFilters.IsOwner.Value)
+                return false;
+
             // Tag filters - listing must contain all selected tags
             if (CurrentFilters.Tags.Count > 0)
             {
@@ -184,21 +187,21 @@ public class MainWindow : Window, IDisposable
             }
         }
         
-        // Create new window with unique ID
-        var detailWindow = new ListingDetailWindow(Plugin, listing);
-        Plugin.WindowSystem.AddWindow(detailWindow);
-        detailWindow.IsOpen = true;
+        // Create new ViewListingWindow for read-only display
+        var viewWindow = new ViewListingWindow(Plugin, listing);
+        Plugin.WindowSystem.AddWindow(viewWindow);
+        viewWindow.IsOpen = true;
         
         // Track the window
-        OpenDetailWindows[listing.Id] = detailWindow;
+        OpenDetailWindows[listing.Id] = viewWindow;
     }
-    
+
     private void OpenCreateListingWindow()
     {
         // Create a new blank listing for creation
         var newListing = new PartyListing
         {
-            Id = Guid.NewGuid().ToString(), // Generate temporary ID for create mode
+            Id = "create_new", // Key for create mode
             CfcId = 0, // Will be set by user
             Description = "",
             Status = "draft",
@@ -238,7 +241,7 @@ public class MainWindow : Window, IDisposable
             }
         }
         
-        var createWindow = new ListingDetailWindow(Plugin, newListing, true); // true = create mode
+        var createWindow = new CreateEditListingWindow(Plugin, newListing, true); // true = create mode
         Plugin.WindowSystem.AddWindow(createWindow);
         createWindow.IsOpen = true;
         
@@ -273,12 +276,23 @@ public class MainWindow : Window, IDisposable
         var closedWindows = OpenDetailWindows.Where(kvp => !kvp.Value.IsOpen).ToList();
         foreach (var closedWindow in closedWindows)
         {
-            if (Plugin.WindowSystem.Windows.Contains(closedWindow.Value))
+            try
             {
-                Plugin.WindowSystem.RemoveWindow(closedWindow.Value);
+                // Remove from WindowSystem first, then dispose
+                if (Plugin.WindowSystem.Windows.Contains(closedWindow.Value))
+                {
+                    Plugin.WindowSystem.RemoveWindow(closedWindow.Value);
+                }
+                // Since we already removed it from WindowSystem, BaseListingWindow.Dispose() won't try to remove it again
+                closedWindow.Value.Dispose();
+                OpenDetailWindows.Remove(closedWindow.Key);
             }
-            closedWindow.Value.Dispose();
-            OpenDetailWindows.Remove(closedWindow.Key);
+            catch (Exception ex)
+            {
+                Svc.Log.Error($"Error cleaning up closed window: {ex.Message}");
+                // Still try to remove from tracking even if disposal failed
+                OpenDetailWindows.Remove(closedWindow.Key);
+            }
         }
     }
 
@@ -364,7 +378,6 @@ public class MainWindow : Window, IDisposable
         if (ImGui.Button("🔄 Refresh Listings"))
         {
             // Reset pagination state on refresh
-            _currentPageUrl = null;
             _nextPageUrl = null;
             _prevPageUrl = null;
             _totalCount = 0;
@@ -465,6 +478,18 @@ public class MainWindow : Window, IDisposable
                 _ => null
             };
             ResetPaginationAndRefresh();
+        }
+        
+        // My Listings toggle filter
+        var myListingsEnabled = CurrentFilters.IsOwner.HasValue && CurrentFilters.IsOwner.Value;
+        if (ImGui.Checkbox("My Listings Only", ref myListingsEnabled))
+        {
+            CurrentFilters.IsOwner = myListingsEnabled ? true : null;
+            ResetPaginationAndRefresh();
+        }
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("Show only party listings you created");
         }
         
         ImGui.Separator();
@@ -683,7 +708,6 @@ public class MainWindow : Window, IDisposable
     /// </summary>
     private void ResetPaginationAndRefresh()
     {
-        _currentPageUrl = null;
         _nextPageUrl = null;
         _prevPageUrl = null;
         _totalCount = 0;

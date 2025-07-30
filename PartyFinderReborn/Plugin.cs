@@ -6,10 +6,16 @@ using ECommons.DalamudServices;
 using PartyFinderReborn.Windows;
 using PartyFinderReborn.Services;
 using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using ImGuiNET;
 using Dalamud.Plugin.Services;
+using FFXIVClientStructs.FFXIV.Client.UI.Info;
+using PartyFinderReborn.Models;
+using Dalamud.Game.Text.SeStringHandling;
+using Dalamud.Game.Text.SeStringHandling.Payloads;
 
 namespace PartyFinderReborn;
 
@@ -33,6 +39,9 @@ public sealed class Plugin : IDalamudPlugin
     private MainWindow MainWindow { get; init; }
 
     private DateTime lastFrameworkUpdate = DateTime.Now;
+    private readonly Dictionary<string, CancellationTokenSource> _notificationWorkers = new();
+    private readonly Dictionary<string, long> _lastNotificationTimestamps = new();
+    private readonly Dictionary<uint, Action<uint, SeString>> _chatLinkHandlers = new();
 
     public Plugin(IDalamudPluginInterface pluginInterface)
     {
@@ -128,6 +137,21 @@ public sealed class Plugin : IDalamudPlugin
         Svc.Commands.RemoveHandler(ConfigCommandName);
 
         Svc.Framework.Update -= OnFrameworkUpdate;
+        
+        // Cancel all notification workers
+        foreach (var (listingId, cts) in _notificationWorkers)
+        {
+            cts.Cancel();
+            cts.Dispose();
+        }
+        _notificationWorkers.Clear();
+        
+        // Remove all chat link handlers
+        foreach (var commandId in _chatLinkHandlers.Keys)
+        {
+            Svc.PluginInterface.RemoveChatLinkHandler(commandId);
+        }
+        _chatLinkHandlers.Clear();
 
         ECommonsMain.Dispose();
     }
@@ -210,6 +234,170 @@ public sealed class Plugin : IDalamudPlugin
             {
                 _ = MainWindow.LoadPartyListingsAsync();
             }
+        }
+    }
+    
+    public void StartJoinNotificationWorker(string listingId)
+    {
+        // Don't start if already running for this listing
+        if (_notificationWorkers.ContainsKey(listingId))
+        {
+            return;
+        }
+
+        var cts = new CancellationTokenSource();
+        _notificationWorkers[listingId] = cts;
+        var token = cts.Token;
+
+        Task.Run(async () =>
+        {
+            while (!token.IsCancellationRequested)
+            {
+                try
+                {
+                    var notifications = await ApiService.GetNotificationsAsync(
+                        since: _lastNotificationTimestamps.GetValueOrDefault(listingId), 
+                        listingId: listingId);
+
+                    if (notifications?.Notifications != null && notifications.Notifications.Any())
+                    {
+                        foreach (var notification in notifications.Notifications)
+                        {
+                            // Store last notification timestamp
+                            var timestamp = ((DateTimeOffset)notification.CreatedAt).ToUnixTimeSeconds();
+                            _lastNotificationTimestamps[listingId] = timestamp;
+
+                            // Send notification to chat
+                            SendJoinNotificationToChat(notification);
+                        }
+                    }
+
+                    await Task.Delay(TimeSpan.FromSeconds(7), token);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Task was canceled, exit gracefully
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    Svc.Log.Error($"Error polling for join notifications on listing {listingId}: {ex.Message}");
+                    await Task.Delay(TimeSpan.FromSeconds(10), token); // Wait longer on error
+                }
+            }
+        }, token);
+        
+        Svc.Log.Info($"Started notification worker for listing {listingId}");
+    }
+
+    public void StopJoinNotificationWorker(string listingId)
+    {
+        if (_notificationWorkers.TryGetValue(listingId, out var cts))
+        {
+            cts.Cancel();
+            cts.Dispose();
+            _notificationWorkers.Remove(listingId);
+            _lastNotificationTimestamps.Remove(listingId);
+            
+            Svc.Log.Info($"Stopped notification worker for listing {listingId}");
+        }
+    }
+
+    private void SendJoinNotificationToChat(InvitationNotification notification)
+    {
+        // Generate a unique command ID for this notification
+        var commandId = (uint)(_chatLinkHandlers.Count + 1);
+        
+        // Create the handler for this specific invite
+        Action<uint, SeString> handler = (id, seString) =>
+        {
+            InvitePlayerToParty(notification.CharacterName, notification.CharacterWorld);
+            
+            // Remove the handler after use
+            if (_chatLinkHandlers.ContainsKey(commandId))
+            {
+                Svc.PluginInterface.RemoveChatLinkHandler(commandId);
+                _chatLinkHandlers.Remove(commandId);
+            }
+        };
+        
+        // Register the handler and store it
+        var linkPayload = Svc.PluginInterface.AddChatLinkHandler(commandId, handler);
+        _chatLinkHandlers[commandId] = handler;
+
+        // Build the SeString message with clickable link
+        var message = new SeStringBuilder()
+            .AddText("[PartyFinderReborn] ")
+            .AddText($"{notification.CharacterDisplay} wants to join your party! ")
+            .Add(linkPayload)
+            .AddText("[Click to Invite]")
+            .Add(RawPayload.LinkTerminator)
+            .BuiltString;
+
+        // Send to chat
+        Svc.Chat.Print(message);
+    }
+
+    private unsafe void InvitePlayerToParty(string? characterName, string? characterWorld)
+    {
+        if (string.IsNullOrEmpty(characterName) || string.IsNullOrEmpty(characterWorld))
+        {
+            Svc.Chat.PrintError("Invalid character information for party invite.");
+            return;
+        }
+
+        try
+        {
+            var infoModule = InfoModule.Instance();
+            if (infoModule == null)
+            {
+                Svc.Chat.PrintError("Failed to access InfoModule.");
+                return;
+            }
+
+            var partyInviteProxy = (InfoProxyPartyInvite*)infoModule->GetInfoProxyById(InfoProxyId.PartyInvite);
+            if (partyInviteProxy == null)
+            {
+                Svc.Chat.PrintError("Failed to access PartyInvite proxy.");
+                return;
+            }
+
+            // Try to invite by character name and world
+            var worldId = GetWorldIdFromName(characterWorld);
+            if (worldId == 0)
+            {
+                Svc.Chat.PrintError($"Unknown world: {characterWorld}");
+                return;
+            }
+
+            var success = partyInviteProxy->InviteToParty(0, characterName, worldId);
+            if (success)
+            {
+                Svc.Chat.Print($"Party invitation sent to {characterName}@{characterWorld}.");
+            }
+            else
+            {
+                Svc.Chat.PrintError($"Failed to send party invitation to {characterName}@{characterWorld}.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Svc.Chat.PrintError($"Error sending party invitation: {ex.Message}");
+            Svc.Log.Error($"Error in InvitePlayerToParty: {ex}");
+        }
+    }
+
+    private ushort GetWorldIdFromName(string worldName)
+    {
+        try
+        {
+            var world = WorldService.GetWorldByName(worldName);
+            return (ushort)(world?.RowId ?? 0);
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Error getting world ID for {worldName}: {ex.Message}");
+            return 0;
         }
     }
 }
