@@ -4,7 +4,9 @@ A modern party matching system for Final Fantasy XIV, built as a Dalamud plugin.
 
 ## Features
 
-- Hello World ImGui window to demonstrate basic functionality
+- Party matching system with server-side progression tracking
+- Real-time duty and progression point completion status
+- RESTful API integration with authentication
 - Configuration system for plugin settings
 - Modern .NET 9 architecture
 - Integration with ECommons for easy Dalamud service access

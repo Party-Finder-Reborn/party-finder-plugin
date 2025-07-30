@@ -43,22 +43,30 @@ public class ActionTrackingService : IDisposable
     {
         if (_configuration.EnableActionTracking)
         {
-            ActionEffect.ActionEffectEntryEvent += OnActionEffect;
+            ActionEffect.ActionEffectEvent += OnActionEffect;
             Svc.Log.Debug("ActionEffect hook enabled");
         }
     }
     
     public void Disable()
     {
-        ActionEffect.ActionEffectEntryEvent -= OnActionEffect;
+        ActionEffect.ActionEffectEvent -= OnActionEffect;
         Svc.Log.Debug("ActionEffect hook disabled");
     }
 
-    private void OnActionEffect(uint sourceId, ushort sequence, ActionEffectType type, uint actionId, ulong targetId, uint damage)
+    private void OnActionEffect(ActionEffectSet set)
     {
         try
         {
             if (!_configuration.EnableActionTracking)
+                return;
+
+            // Check if we have a valid action
+            if (set.Action == null || !set.Action.HasValue)
+                return;
+                
+            var sourceId = (uint)(set.Source?.GameObjectId ?? 0);
+            if (sourceId == 0)
                 return;
 
             // Check if source is player/party and should be filtered
@@ -75,6 +83,9 @@ public class ActionTrackingService : IDisposable
             
             if (cfcId.HasValue)
             {
+                // Get the proper action ID from the ActionEffectSet
+                var actionId = set.Action.Value.RowId;
+                
                 // Avoid duplicates within single session
                 var key = (cfcId.Value, actionId);
                 if (_seenProgPoints.Contains(key))
@@ -87,13 +98,13 @@ public class ActionTrackingService : IDisposable
                 _progPointTimestamps[key] = DateTime.Now;
                 
                 // Add to DutyProgressService immediately
-                _ = Task.Run(async () => await _dutyProgressService.AddSeenProgPoint(cfcId.Value, actionId));
+                _ = Task.Run(async () => await _dutyProgressService.MarkProgPointSeenAsync(cfcId.Value, actionId));
                 
-                Svc.Log.Info($"🎯 NEW PROGRESS POINT: Action {actionId} tracked for duty {cfcId.Value} in territory {territoryType}");
+                Svc.Log.Info($"🎯 NEW PROGRESS POINT: Action {actionId} ({set.Action.Value.Name}) tracked for duty {cfcId.Value} in territory {territoryType}");
             }
             else
             {
-                Svc.Log.Debug($"No CFC ID found for territory {territoryType}, ignoring action {actionId}");
+                Svc.Log.Debug($"No CFC ID found for territory {territoryType}, ignoring action {set.Action.Value.RowId}");
             }
         }
         catch (Exception ex)
@@ -206,6 +217,7 @@ public class ActionTrackingService : IDisposable
             return false;
         }
     }
+    
 
     
     private void OnTerritoryChanged(ushort territoryType)

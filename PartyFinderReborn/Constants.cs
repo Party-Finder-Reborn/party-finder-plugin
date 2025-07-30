@@ -20,4 +20,5 @@ public static class Constants
     public const string ApiListingsEndpoint = "/api/v1/listings/";
     public const string ApiAuthEndpoint = "/api/auth/";
     public const string ApiCoreEndpoint = "/api/core/";
+    public const string ProgressBase = "/api/v1/progress";
 }

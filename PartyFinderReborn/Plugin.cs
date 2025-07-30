@@ -79,7 +79,27 @@ public sealed class Plugin : IDalamudPlugin
         pluginInterface.UiBuilder.OpenConfigUi += ToggleConfigUI;
         pluginInterface.UiBuilder.OpenMainUi += ToggleMainUI;
 
+        // Subscribe to login and logout events
+        Svc.ClientState.Login += OnLogin;
+
         Svc.Log.Info("Party Finder Reborn initialized successfully!");
+    }
+
+    private void OnLogin()
+    {
+        Svc.Log.Info("Player logged in, running initial sync of completed duties.");
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await DutyProgressService.SyncDutiesOnLoginAsync();
+                Svc.Log.Info("Initial duty sync completed successfully.");
+            }
+            catch (Exception ex)
+            {
+                Svc.Log.Error($"Failed to sync duties on login: {ex.Message}");
+            }
+        });
     }
 
     public void Dispose()

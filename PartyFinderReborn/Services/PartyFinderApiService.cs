@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
@@ -18,6 +19,8 @@ public class PartyFinderApiService : IDisposable
 {
     private readonly HttpClient _httpClient;
     private readonly Configuration _configuration;
+    private static readonly ConcurrentDictionary<string, object> _cache = new();
+    private static readonly TimeSpan _cacheDuration = TimeSpan.FromMinutes(5);
     
     public PartyFinderApiService(Configuration configuration)
     {
@@ -61,7 +64,13 @@ public class PartyFinderApiService : IDisposable
             if (response.IsSuccessStatusCode)
             {
                 var json = await response.Content.ReadAsStringAsync();
-                return JsonConvert.DeserializeObject<UserProfile>(json);
+                Svc.Log.Debug($"User profile API response: {json}");
+                var userProfile = JsonConvert.DeserializeObject<UserProfile>(json);
+                if (userProfile != null)
+                {
+                    Svc.Log.Debug($"Deserialized user profile for {userProfile.DisplayName}");
+                }
+                return userProfile;
             }
             
             Svc.Log.Warning($"Failed to get user profile: {response.StatusCode}");
@@ -134,45 +143,6 @@ public class PartyFinderApiService : IDisposable
         }
     }
     
-    // Additional methods for updating user progress
-    
-    /// <summary>
-    /// Update completed duties on the server
-    /// </summary>
-    public async Task<bool> UpdateCompletedDutiesAsync(List<uint> completedDuties)
-    {
-        try
-        {
-            var json = JsonConvert.SerializeObject(new { completed_duties = completedDuties });
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
-            var response = await _httpClient.PutAsync($"{Constants.ApiBaseUrl}/api/auth/plugin/completed-duties/", content);
-            return response.IsSuccessStatusCode;
-        }
-        catch (Exception ex)
-        {
-            Svc.Log.Error($"Error updating completed duties: {ex.Message}");
-            return false;
-        }
-    }
-
-    /// <summary>
-    /// Update seen progress points on the server
-    /// </summary>
-    public async Task<bool> UpdateSeenProgPointsAsync(Dictionary<string, List<uint>> seenProgPoints)
-    {
-        try
-        {
-            var json = JsonConvert.SerializeObject(new { seen_prog_points = seenProgPoints });
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
-            var response = await _httpClient.PutAsync($"{Constants.ApiBaseUrl}/api/auth/plugin/seen-prog-points/", content);
-            return response.IsSuccessStatusCode;
-        }
-        catch (Exception ex)
-        {
-            Svc.Log.Error($"Error updating seen progress points: {ex.Message}");
-            return false;
-        }
-    }
 
     /// <summary>
     /// Get popular tags
@@ -299,4 +269,163 @@ public class PartyFinderApiService : IDisposable
     {
         _httpClient?.Dispose();
     }
+
+    /// <summary>
+    /// Checks if a duty is marked as completed.
+    /// </summary>
+    public async Task<bool?> IsDutyCompletedAsync(uint dutyId)
+    {
+        var cacheKey = $"duty-{dutyId}-completed";
+        if (_cache.TryGetValue(cacheKey, out var cachedValue) && cachedValue is bool cachedResult)
+        {
+            return cachedResult;
+        }
+
+        try
+        {
+            var response = await _httpClient.GetAsync($"{Constants.ApiBaseUrl}{Constants.ProgressBase}/duty/{dutyId}/completed/");
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadAsStringAsync();
+                var result = JsonConvert.DeserializeObject<Dictionary<string, bool>>(json);
+                if (result != null && result.TryGetValue("completed", out var isCompleted))
+                {
+                    _cache.TryAdd(cacheKey, isCompleted);
+                    return isCompleted;
+                }
+            }
+            Svc.Log.Warning($"Failed to get duty completion status for {dutyId}: {response.StatusCode}");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Error checking duty completion status for {dutyId}: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Checks if a specific progression point for a duty is marked as completed.
+    /// </summary>
+    public async Task<bool?> IsProgPointCompletedAsync(uint dutyId, uint actionId)
+    {
+        var cacheKey = $"duty-{dutyId}-point-{actionId}-completed";
+        if (_cache.TryGetValue(cacheKey, out var cachedValue) && cachedValue is bool cachedResult)
+        {
+            return cachedResult;
+        }
+
+        try
+        {
+            var response = await _httpClient.GetAsync($"{Constants.ApiBaseUrl}{Constants.ProgressBase}/duty/{dutyId}/point/{actionId}/completed/");
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadAsStringAsync();
+                var result = JsonConvert.DeserializeObject<Dictionary<string, bool>>(json);
+                if (result != null && result.TryGetValue("completed", out var isCompleted))
+                {
+                    _cache.TryAdd(cacheKey, isCompleted);
+                    return isCompleted;
+                }
+            }
+            Svc.Log.Warning($"Failed to get progression point completion status for duty {dutyId}, action {actionId}: {response.StatusCode}");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Error checking progression point completion status for duty {dutyId}, action {actionId}: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Gets a list of completed progression points for a duty.
+    /// </summary>
+    public async Task<List<uint>?> GetCompletedProgPointsAsync(uint dutyId)
+    {
+        var cacheKey = $"duty-{dutyId}-points";
+        if (_cache.TryGetValue(cacheKey, out var cachedValue) && cachedValue is List<uint> cachedResult)
+        {
+            return cachedResult;
+        }
+
+        try
+        {
+            var response = await _httpClient.GetAsync($"{Constants.ApiBaseUrl}{Constants.ProgressBase}/duty/{dutyId}/points/");
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadAsStringAsync();
+                var result = JsonConvert.DeserializeObject<Dictionary<string, List<uint>>>(json);
+                if (result != null && result.TryGetValue("points", out var points))
+                {
+                    _cache.TryAdd(cacheKey, points);
+                    return points;
+                }
+            }
+            Svc.Log.Warning($"Failed to get completed progression points for {dutyId}: {response.StatusCode}");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Error getting completed progression points for {dutyId}: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Marks a duty as completed on the server.
+    /// </summary>
+    public async Task<bool> MarkDutyCompletedAsync(uint dutyId)
+    {
+        try
+        {
+            var response = await _httpClient.PostAsync($"{Constants.ApiBaseUrl}{Constants.ProgressBase}/duty/{dutyId}/complete/", null);
+            
+            if (response.StatusCode == System.Net.HttpStatusCode.Created)
+            {
+                // Clear related cache entries
+                var cacheKey = $"duty-{dutyId}-completed";
+                _cache.TryRemove(cacheKey, out _);
+                return true;
+            }
+            
+            Svc.Log.Warning($"Failed to mark duty {dutyId} as completed: {response.StatusCode}");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Error marking duty {dutyId} as completed: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Marks a specific progression point for a duty as completed on the server.
+    /// </summary>
+    public async Task<bool> MarkProgPointCompletedAsync(uint dutyId, uint actionId)
+    {
+        try
+        {
+            var response = await _httpClient.PostAsync($"{Constants.ApiBaseUrl}{Constants.ProgressBase}/duty/{dutyId}/point/{actionId}/complete/", null);
+            
+            if (response.StatusCode == System.Net.HttpStatusCode.Created)
+            {
+                // Clear related cache entries
+                var completedCacheKey = $"duty-{dutyId}-point-{actionId}-completed";
+                var pointsCacheKey = $"duty-{dutyId}-points";
+                _cache.TryRemove(completedCacheKey, out _);
+                _cache.TryRemove(pointsCacheKey, out _);
+                return true;
+            }
+            
+            Svc.Log.Warning($"Failed to mark progression point for duty {dutyId}, action {actionId} as completed: {response.StatusCode}");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Error marking progression point for duty {dutyId}, action {actionId} as completed: {ex.Message}");
+            return false;
+        }
+    }
+
 }

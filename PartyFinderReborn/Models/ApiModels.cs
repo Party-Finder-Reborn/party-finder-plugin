@@ -28,22 +28,32 @@ public class UserProfile
     [JsonProperty("has_api_key")]
     public bool HasApiKey { get; set; }
     
-    [JsonProperty("completed_duties")]
+    /// <summary>
+    /// DEPRECATED: Use DutyProgressService instead. This field is maintained for backward compatibility only.
+    /// </summary>
+    [JsonIgnore]
+    [Obsolete("Use DutyProgressService.IsDutyCompleted() instead")]
     public List<uint> CompletedDuties { get; set; } = new();
     
-    [JsonProperty("seen_prog_points")]
+    /// <summary>
+    /// DEPRECATED: Use DutyProgressService instead. This field is maintained for backward compatibility only.
+    /// </summary>
+    [JsonIgnore]
+    [Obsolete("Use DutyProgressService.GetSeenProgPoints() instead")]
     public Dictionary<string, List<uint>> SeenProgPoints { get; set; } = new();
     
     public string DisplayName => DiscordGlobalName ?? DiscordUsername ?? DiscordId;
     
     /// <summary>
-    /// Check if a duty has been completed
+    /// DEPRECATED: Check if a duty has been completed. Use DutyProgressService.IsDutyCompleted() instead.
     /// </summary>
+    [Obsolete("Use DutyProgressService.IsDutyCompleted() instead")]
     public bool HasCompletedDuty(uint dutyId) => CompletedDuties.Contains(dutyId);
     
     /// <summary>
-    /// Get seen progress points for a specific duty
+    /// DEPRECATED: Get seen progress points for a specific duty. Use DutyProgressService.GetSeenProgPoints() instead.
     /// </summary>
+    [Obsolete("Use DutyProgressService.GetSeenProgPoints() instead")]
     public List<uint> GetSeenProgPoints(uint dutyId)
     {
         var key = dutyId.ToString();
@@ -51,8 +61,9 @@ public class UserProfile
     }
     
     /// <summary>
-    /// Check if a specific progress point has been seen for a duty
+    /// DEPRECATED: Check if a specific progress point has been seen for a duty. Use DutyProgressService.HasSeenProgPoint() instead.
     /// </summary>
+    [Obsolete("Use DutyProgressService.HasSeenProgPoint() instead")]
     public bool HasSeenProgPoint(uint dutyId, uint actionId)
     {
         return GetSeenProgPoints(dutyId).Contains(actionId);

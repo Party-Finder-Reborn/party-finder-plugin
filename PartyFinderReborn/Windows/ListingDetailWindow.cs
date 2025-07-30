@@ -45,6 +45,11 @@ public class ListingDetailWindow : Window, IDisposable
     // Duty selection state
     private ContentFinderCondition? SelectedDuty;
     private DutySelectorModal DutySelectorModal;
+    
+    // Async loading states
+    private bool _progPointsLoading = false;
+    private List<uint>? _cachedProgPoints = null;
+    private uint _cachedProgPointsDutyId = 0;
 
     public ListingDetailWindow(Plugin plugin, PartyListing listing, bool createMode = false) 
         : base(createMode ? $"Create New Party Listing##create_{listing.Id}" : $"Duty #{listing.CfcId}##{listing.Id}")
@@ -199,6 +204,9 @@ public class ListingDetailWindow : Window, IDisposable
             {
                 var progPointNames = progPoints.Select(id => Plugin.ActionNameService.Get(id));
                 ImGui.Text($"• Progress Points: {string.Join(", ", progPointNames)}");
+                
+                // Show progression status for each required progress point
+                DrawProgressionStatus(progPoints);
             }
             else
             {
@@ -210,6 +218,9 @@ public class ListingDetailWindow : Window, IDisposable
         if (Listing.RequiredClears.Count > 0)
         {
             ImGui.Text($"• Required Clears: {string.Join(", ", Listing.RequiredClears.Select(c => $"#{c}"))}");
+            
+            // Show completion status for each required clear
+            DrawRequiredClearsStatus(Listing.RequiredClears);
         }
         
         if (Listing.RequiredPlugins.Count > 0)
@@ -749,17 +760,13 @@ public class ListingDetailWindow : Window, IDisposable
     }
 
     /// <summary>
-    /// Get user's seen progress points for the current duty from the server via UserProfile
+    /// Get user's seen progress points for the current duty from DutyProgressService
     /// </summary>
     private async Task<List<uint>> GetUserSeenProgPointsAsync(uint dutyId)
     {
         try
         {
-            var userProfile = await Plugin.ApiService.GetUserProfileAsync();
-            if (userProfile != null)
-            {
-                return userProfile.GetSeenProgPoints(dutyId);
-            }
+            return await Plugin.DutyProgressService.GetCompletedProgPointsAsync(dutyId) ?? new List<uint>();
         }
         catch (Exception ex)
         {
@@ -770,88 +777,209 @@ public class ListingDetailWindow : Window, IDisposable
     }
     
     /// <summary>
+    /// Get available progress points using cached results for responsive UI
+    /// </summary>
+    private List<uint> GetAvailableProgPointsWithCache(uint dutyId)
+    {
+        if (dutyId == 0)
+            return new List<uint>();
+        
+        // Check if we have cached data for this duty
+        if (_cachedProgPointsDutyId == dutyId && _cachedProgPoints != null)
+        {
+            return _cachedProgPoints;
+        }
+        
+        // Check if we're already loading
+        if (_progPointsLoading)
+        {
+            return new List<uint>();
+        }
+        
+        // Start async load if needed
+        if (_cachedProgPointsDutyId != dutyId || _cachedProgPoints == null)
+        {
+            _ = LoadProgPointsAsync(dutyId);
+        }
+        
+        // Return cached data if available, or empty list while loading
+        return _cachedProgPoints ?? new List<uint>();
+    }
+    
+    /// <summary>
+    /// Load progress points asynchronously and cache them
+    /// </summary>
+    private async Task LoadProgPointsAsync(uint dutyId)
+    {
+        if (_progPointsLoading || dutyId == 0)
+            return;
+            
+        _progPointsLoading = true;
+        
+        try
+        {
+            // Use DutyProgressService to get seen progress points from cached local mirror
+            // This is fast as it uses cached data from the service
+            var progPoints = Plugin.DutyProgressService.GetSeenProgPoints(dutyId);
+            
+            // Cache the results
+            _cachedProgPoints = progPoints;
+            _cachedProgPointsDutyId = dutyId;
+            
+            // If no cached data available, try async fetch as fallback
+            if (progPoints.Count == 0)
+            {
+                var asyncProgPoints = await Plugin.DutyProgressService.GetCompletedProgPointsAsync(dutyId);
+                if (asyncProgPoints != null && asyncProgPoints.Count > 0)
+                {
+                    _cachedProgPoints = asyncProgPoints;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Failed to load progress points for duty {dutyId}: {ex.Message}");
+            _cachedProgPoints = new List<uint>();
+        }
+        finally
+        {
+            _progPointsLoading = false;
+        }
+    }
+    
+    /// <summary>
+    /// Draw completion status for required duty clears
+    /// </summary>
+    private void DrawRequiredClearsStatus(List<uint> requiredClears)
+    {
+        ImGui.Indent();
+        ImGui.Text("Your Completion Status:");
+        
+        foreach (var dutyId in requiredClears)
+        {
+            var dutyName = Plugin.ContentFinderService.GetDutyDisplayName(dutyId);
+            var isCompleted = Plugin.DutyProgressService.IsDutyCompleted(dutyId);
+            
+            if (isCompleted)
+            {
+                ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.0f, 1.0f), $"  ✓ #{dutyId} {dutyName} (Cleared)");
+            }
+            else
+            {
+                ImGui.TextColored(new Vector4(1.0f, 0.5f, 0.0f, 1.0f), $"  ✗ #{dutyId} {dutyName} (Not Cleared)");
+            }
+        }
+        
+        ImGui.Unindent();
+    }
+    
+    /// <summary>
+    /// Draw progression status for required progress points
+    /// </summary>
+    private void DrawProgressionStatus(List<uint> requiredProgPoints)
+    {
+        ImGui.Indent();
+        ImGui.Text("Your Progress:");
+        
+        foreach (var actionId in requiredProgPoints)
+        {
+            var actionName = Plugin.ActionNameService.Get(actionId);
+            var hasSeen = Plugin.DutyProgressService.HasSeenProgPoint(Listing.CfcId, actionId);
+            
+            if (hasSeen)
+            {
+                ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.0f, 1.0f), $"  ✓ {actionName} (Seen)");
+            }
+            else
+            {
+                ImGui.TextColored(new Vector4(1.0f, 0.5f, 0.0f, 1.0f), $"  ✗ {actionName} (Not Seen)");
+            }
+        }
+        
+        ImGui.Unindent();
+    }
+    
+    /// <summary>
     /// Draw the Progress Points (Boss Abilities) section with multi-select interface
     /// </summary>
     private void DrawProgressPointsSection()
     {
-        // Header with collapsible tree node
-        if (ImGui.TreeNode("Progress Points (Boss Abilities)"))
+        ImGui.Text("Progress Points (Boss Abilities)");
+        ImGui.TextDisabled("Select specific boss abilities that party members must have seen");
+        
+        try
         {
-            try
+            // Show currently selected progress points
+            ImGui.Text("Currently Selected:");
+            if (EditProgPoint.Count > 0)
             {
-                // Show currently selected progress points
-                if (EditProgPoint.Count > 0)
+                if (ImGui.BeginChild("SelectedProgPoints", new Vector2(-1, 80), true))
                 {
-                    ImGui.Text("Selected Progress Points:");
                     for (int i = EditProgPoint.Count - 1; i >= 0; i--)
                     {
                         var actionId = EditProgPoint[i];
                         var actionName = Plugin.ActionNameService.Get(actionId);
                         ImGui.Text($"• {actionName}");
                         ImGui.SameLine();
-                        if (ImGui.SmallButton($"Remove##progpoint{i}"))
+                        if (ImGui.SmallButton($"✕##remove_progpoint_{i}"))
                         {
                             EditProgPoint.RemoveAt(i);
                         }
                     }
-                    ImGui.Separator();
                 }
-                
-                // Load seen progress points asynchronously
-                var seenProgPoints = new List<uint>();
-                if (EditCfcId > 0)
-                {
-                    // For now, use DutyProgressService to get seen progress points
-                    // Note: This should be updated when user profile is available
-                    seenProgPoints = Plugin.DutyProgressService.GetSeenProgPoints(EditCfcId);
-                }
-                
-                if (seenProgPoints.Count > 0)
-                {
-                    ImGui.Text("Available Progress Points:");
-                    ImGui.TextDisabled("(Based on your seen actions for this duty)");
-                    
-                    // Create a multi-select list of available progress points
-                    if (ImGui.BeginListBox("##availableprogpoints", new Vector2(-1, 150)))
-                    {
-                        foreach (var actionId in seenProgPoints)
-                        {
-                            var actionName = Plugin.ActionNameService.Get(actionId);
-                            var isSelected = EditProgPoint.Contains(actionId);
-                            
-                            if (ImGui.Checkbox($"{actionName}##progpoint_{actionId}", ref isSelected))
-                            {
-                                if (isSelected && !EditProgPoint.Contains(actionId))
-                                {
-                                    EditProgPoint.Add(actionId);
-                                }
-                                else if (!isSelected && EditProgPoint.Contains(actionId))
-                                {
-                                    EditProgPoint.Remove(actionId);
-                                }
-                            }
-                        }
-                        ImGui.EndListBox();
-                    }
-                }
-                else
-                {
-                    ImGui.TextDisabled("No progress points available for this duty.");
-                    ImGui.TextDisabled("Progress points will appear here after you've encountered boss abilities.");
-                }
-                
-                // Add help text
-                ImGui.Separator();
-                ImGui.TextDisabled("Progress points help track specific boss abilities or mechanics you've encountered.");
-                ImGui.TextDisabled("Select the abilities you want party members to have seen.");
+                ImGui.EndChild();
             }
-            catch (Exception ex)
+            else
             {
-                Svc.Log.Error($"Error drawing progress points section: {ex.Message}");
-                ImGui.TextColored(new Vector4(1, 0, 0, 1), "Error loading progress points");
+                ImGui.TextDisabled("No progress points selected");
             }
             
-            ImGui.TreePop();
+            ImGui.Spacing();
+            
+            // Get available progress points from cached data or initiate async load
+            var availableProgPoints = GetAvailableProgPointsWithCache(EditCfcId);
+            
+            ImGui.Text("Add Progress Points:");
+            if (_progPointsLoading)
+            {
+                ImGui.TextDisabled("Loading available progress points...");
+            }
+            else if (availableProgPoints.Count > 0)
+            {
+                ImGui.TextDisabled($"Available abilities for this duty ({availableProgPoints.Count} total)");
+
+                // Dropdown selector for adding progress points
+                if (ImGui.BeginCombo("##select_progpoint", "Select an ability to add..."))
+                {
+                    foreach (var actionId in availableProgPoints)
+                    {
+                        // Skip already selected items
+                        if (EditProgPoint.Contains(actionId))
+                            continue;
+
+                        var actionName = Plugin.ActionNameService.Get(actionId);
+
+                        if (ImGui.Selectable($"{actionName}##add_progpoint_{actionId}"))
+                        {
+                            if (!EditProgPoint.Contains(actionId))
+                            {
+                                EditProgPoint.Add(actionId);
+                            }
+                        }
+                    }
+                    ImGui.EndCombo();
+                }
+            }
+            else
+            {
+                ImGui.TextDisabled("No progress points available for this duty.");
+                ImGui.TextDisabled("Progress points will appear here after you've encountered boss abilities in-game.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Error drawing progress points section: {ex.Message}");
+            ImGui.TextColored(new Vector4(1, 0, 0, 1), "Error loading progress points");
         }
     }
 }

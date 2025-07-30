@@ -85,7 +85,15 @@ public class ActionNameService : IDisposable
             InitializeCache();
         }
         
-        return _actionNameCache?.GetValueOrDefault(id, $"Action #{id}") ?? $"Action #{id}";
+        var result = _actionNameCache?.GetValueOrDefault(id, $"Action #{id}") ?? $"Action #{id}";
+        
+        // Debug logging to help diagnose the issue
+        if (result == $"Action #{id}")
+        {
+            Svc.Log.Debug($"Action #{id} not found in cache (cache size: {_actionNameCache?.Count ?? 0})");
+        }
+        
+        return result;
     }
     
     /// <summary>

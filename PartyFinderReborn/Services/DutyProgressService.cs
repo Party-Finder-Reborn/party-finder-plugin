@@ -23,392 +23,229 @@ public class DutyProgressService : IDisposable
     private readonly PartyFinderApiService _apiService;
     private readonly Configuration _configuration;
     
-    // Cached completion data
-    private HashSet<uint> _completedDuties = new();
-    private Dictionary<uint, List<uint>> _seenProgPoints = new();
-    
-    // Tracking state
-    private bool _isInitialized = false;
-    private DateTime _lastSync = DateTime.MinValue;
-    private TimeSpan SyncInterval => TimeSpan.FromSeconds(_configuration.SyncDebounceSeconds);
-    
-    // Thread-safety for external prog-point pushes
     private readonly SemaphoreSlim _progPointsSemaphore = new(1, 1);
-    private readonly SemaphoreSlim _syncSemaphore = new(1, 1);
+    private readonly HashSet<uint> _completedDutiesMirror = new();
+    private readonly Dictionary<uint, HashSet<uint>> _seenProgPointsMirror = new();
     
     public DutyProgressService(ContentFinderService contentFinderService, PartyFinderApiService apiService, Configuration configuration)
     {
         _contentFinderService = contentFinderService;
         _apiService = apiService;
         _configuration = configuration;
-        
-        // Hook into relevant game events
-        //Svc.DutyState.DutyCompleted += OnDutyCompleted;
-        //Svc.ClientState.TerritoryChanged += OnTerritoryChanged;
-        
+
         _ = Task.Run(InitializeAsync);
     }
     
     public void Dispose()
     {
-        // Unhook events
-        //Svc.DutyState.DutyCompleted -= OnDutyCompleted;
-        //Svc.ClientState.TerritoryChanged -= OnTerritoryChanged;
-        
-        // Clean up thread-safety resources
         _progPointsSemaphore?.Dispose();
-        _syncSemaphore?.Dispose();
     }
     
-    /// <summary>
-    /// Initialize the service and load existing progress data
-    /// </summary>
     private async Task InitializeAsync()
     {
         try
         {
-            if (!_isInitialized)
-            {
-                await LoadProgressFromGame();
-                await SyncWithServer();
-                _isInitialized = true;
-                
-                Svc.Log.Info("DutyProgressService initialized successfully");
-            }
+            // Initial population of the local mirror
+            await RefreshLocalMirrorAsync();
+            
+            // Run initial sync from game state for redundancy and testing
+            Svc.Log.Info("Running initial duty sync from game state...");
+            await SyncDutiesOnLoginAsync();
+            
+            Svc.Log.Info("DutyProgressService initialized and initial sync completed.");
         }
         catch (Exception ex)
         {
             Svc.Log.Error($"Failed to initialize DutyProgressService: {ex.Message}");
         }
     }
-    
+
     /// <summary>
-    /// Load progress data from the game client using UIState methods
+    /// Refreshes the local mirror of completed duties and prog points from the server.
+    /// Note: This is a lightweight refresh that doesn't pre-populate all data.
+    /// Individual API calls will cache data as needed.
     /// </summary>
-    private async Task LoadProgressFromGame()
+    public Task RefreshLocalMirrorAsync()
     {
         try
         {
-            // Clear existing completed duties data but preserve progress points
-            _completedDuties.Clear();
-            // NOTE: We intentionally do NOT clear _seenProgPoints here - they are a permanent record
+            // Clear local mirrors - they will be populated on-demand via API calls
+            _completedDutiesMirror.Clear();
+            _seenProgPointsMirror.Clear();
             
-            // Use UIState methods to check completion status
-            await LoadCompletedDutiesFromUIState();
-            
-            Svc.Log.Info($"Loaded {_completedDuties.Count} completed duties from game data");
+            Svc.Log.Info("Cleared local mirrors. Data will be populated on-demand via cached API calls.");
         }
         catch (Exception ex)
         {
-            Svc.Log.Error($"Failed to load progress from game: {ex.Message}");
+            Svc.Log.Error($"Failed to refresh local mirror: {ex.Message}");
         }
-    }
-    
-    /// <summary>
-    /// Load completed duties using UIState methods
-    /// </summary>
-    private Task LoadCompletedDutiesFromUIState()
-    {
-        return Task.Run(() =>
-        {
-            try
-            {
-                var contentFinderConditionSheet = Svc.Data.GetExcelSheet<ContentFinderCondition>();
-                if (contentFinderConditionSheet == null) return;
-                
-                foreach (var cfc in contentFinderConditionSheet)
-                {
-                    if (cfc.RowId == 0) continue;
-                    
-                    // Get the InstanceContent ID from ContentFinderCondition
-                    var instanceContentId = GetInstanceContentId(cfc);
-                    if (instanceContentId == 0) continue;
-                    
-                    // Check if this instance content is completed using UIState
-                    if (UIState.IsInstanceContentCompleted(instanceContentId))
-                    {
-                        _completedDuties.Add(cfc.RowId);
-                    }
-                }
-                
-                Svc.Log.Debug($"Loaded {_completedDuties.Count} completed duties using UIState");
-            }
-            catch (Exception ex)
-            {
-                Svc.Log.Error($"Failed to load duties from UIState: {ex.Message}");
-            }
-        });
-    }
-    
-    /// <summary>
-    /// Get the InstanceContent ID from a ContentFinderCondition
-    /// </summary>
-    private uint GetInstanceContentId(ContentFinderCondition cfc)
-    {
-        try
-        {
-            // ContentFinderCondition has a Content field that links to InstanceContent
-            // This might be direct or need mapping - we'll need to investigate the structure
-            return cfc.Content.RowId;
-        }
-        catch
-        {
-            return 0;
-        }
-    }
-    
-    /// <summary>
-    /// Load completed duties based on achievement data (deprecated - kept for fallback)
-    /// </summary>
-    private Task LoadCompletedDutiesFromAchievements()
-    {
-        return Task.Run(() =>
-        {
-            try
-            {
-                var achievementSheet = Svc.Data.GetExcelSheet<LuminaAchievement>();
-                if (achievementSheet == null) return;
-                
-                unsafe
-                {
-                    // Get the achievement manager
-                    var achievementManager = FFXIVClientStructs.FFXIV.Client.Game.UI.Achievement.Instance();
-                    if (achievementManager == null) return;
-                    
-                    // Dynamically build achievement to duty mapping
-                    var achievementToDutyMap = BuildAchievementToDutyMapping();
-                    
-                    foreach (var (achievementId, dutyIds) in achievementToDutyMap)
-                    {
-                        if (achievementManager->IsComplete((int)achievementId))
-                        {
-                            foreach (var dutyId in dutyIds)
-                            {
-                                _completedDuties.Add(dutyId);
-                            }
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Svc.Log.Error($"Failed to load achievements: {ex.Message}");
-            }
-        });
-    }
-    
-    /// <summary>
-    /// Load completed duties based on quest completion flags
-    /// </summary>
-    private Task LoadCompletedDutiesFromQuests()
-    {
-        return Task.Run(() =>
-        {
-            try
-            {
-                var questSheet = Svc.Data.GetExcelSheet<Quest>();
-                if (questSheet == null) return;
-                
-                // Dynamically build quest to duty mapping
-                var questToDutyMap = BuildQuestToDutyMapping();
-                
-                foreach (var (questId, dutyIds) in questToDutyMap)
-                {
-                    if (QuestManager.IsQuestComplete((ushort)questId))
-                    {
-                        foreach (var dutyId in dutyIds)
-                        {
-                            _completedDuties.Add(dutyId);
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Svc.Log.Error($"Failed to load quest completions: {ex.Message}");
-            }
-        });
-    }
-    
-    /// <summary>
-    /// Load progress data from UI agents
-    /// </summary>
-    private unsafe void LoadProgressFromUIAgents()
-    {
-        try
-        {
-            // Try to get data from ContentsFinder agent
-            var contentsFinderAgent = AgentContentsFinder.Instance();
-            if (contentsFinderAgent != null)
-            {
-                // This would need more investigation into the agent structure
-                // to extract completion data
-            }
-            
-            // Try to get data from other relevant agents
-            // This is where we'd hook into the party finder data, achievement progress, etc.
-        }
-        catch (Exception ex)
-        {
-            Svc.Log.Error($"Failed to load from UI agents: {ex.Message}");
-        }
-    }
-    
-    /// <summary>
-    /// Sync local progress data with the server
-    /// </summary>
-    public async Task SyncWithServer()
-    {
-        // Use semaphore to prevent multiple simultaneous syncs (debouncing)
-        if (!await _syncSemaphore.WaitAsync(100)) // Quick timeout for debouncing
-            return;
         
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Synchronizes completed duties from the game to the server on login.
+    /// </summary>
+    public async Task SyncDutiesOnLoginAsync()
+    {
         try
         {
-            if (DateTime.Now - _lastSync < SyncInterval)
-                return; // Don't sync too frequently
-            
-            // Convert to the format expected by the API
-            var completedDutiesList = _completedDuties.ToList();
-            var seenProgPointsDict = _seenProgPoints.ToDictionary(
-                kvp => kvp.Key.ToString(), 
-                kvp => kvp.Value
-            );
-            
-            // Update server with our local data
-            var completedSuccess = await _apiService.UpdateCompletedDutiesAsync(completedDutiesList);
-            var progPointsSuccess = await _apiService.UpdateSeenProgPointsAsync(seenProgPointsDict);
-            
-            if (completedSuccess && progPointsSuccess)
+            var allDuties = _contentFinderService.GetAllDuties();
+            var completedDutiesFromGame = new List<uint>();
+
+            // Check each duty against the game state using UIState.IsInstanceContentCompleted
+            foreach (var duty in allDuties)
             {
-                _lastSync = DateTime.Now;
-                Svc.Log.Debug($"Successfully synced progress data with server");
+                try
+                {
+                    if (UIState.IsInstanceContentCompleted(duty.RowId))
+                    {
+                        completedDutiesFromGame.Add(duty.RowId);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Svc.Log.Warning($"Failed to check completion for duty {duty.RowId}: {ex.Message}");
+                }
+            }
+
+            if (completedDutiesFromGame.Count > 0)
+            {
+                Svc.Log.Info($"Found {completedDutiesFromGame.Count} completed duties in game state. Syncing them individually.");
+                var successCount = 0;
+                
+                foreach (var dutyId in completedDutiesFromGame)
+                {
+                    // Only sync if not already in our local mirror.
+                    if (_completedDutiesMirror.Contains(dutyId)) continue;
+
+                    var success = await _apiService.MarkDutyCompletedAsync(dutyId);
+                    if (success)
+                    {
+                        _completedDutiesMirror.Add(dutyId);
+                        successCount++;
+                    }
+                }
+                
+                Svc.Log.Info($"Successfully synced {successCount} new completed duties to the server.");
             }
             else
             {
-                Svc.Log.Warning("Failed to sync some progress data with server");
+                Svc.Log.Info("No completed duties found in game state to sync.");
             }
         }
         catch (Exception ex)
         {
-            Svc.Log.Error($"Failed to sync with server: {ex.Message}");
-        }
-        finally
-        {
-            _syncSemaphore.Release();
+            Svc.Log.Error($"An error occurred during duty synchronization: {ex.Message}");
         }
     }
     
     /// <summary>
-    /// Mark a duty as completed locally and sync with server
+    /// Marks a duty as completed and immediately informs the server.
     /// </summary>
-    public async Task MarkDutyCompleted(uint dutyId)
+    public async Task MarkDutyCompletedAsync(uint dutyId)
     {
-        if (_completedDuties.Add(dutyId))
+        if (_completedDutiesMirror.Contains(dutyId)) return;
+
+        var success = await _apiService.MarkDutyCompletedAsync(dutyId);
+        if (success)
         {
-            Svc.Log.Info($"Marked duty {dutyId} as completed");
-            await SyncWithServer();
+            _completedDutiesMirror.Add(dutyId);
+            Svc.Log.Info($"Marked duty {dutyId} as completed on server.");
         }
     }
-    
+
     /// <summary>
-    /// Add a seen progress point for a duty - Thread-safe for external prog-point pushes
+    /// Marks a progress point as seen and immediately informs the server.
     /// </summary>
-    public async Task AddSeenProgPoint(uint dutyId, uint actionId)
+    public async Task MarkProgPointSeenAsync(uint dutyId, uint actionId)
     {
         await _progPointsSemaphore.WaitAsync();
-        
         try
         {
-            bool wasAdded = false;
-            
-            if (!_seenProgPoints.ContainsKey(dutyId))
-                _seenProgPoints[dutyId] = new List<uint>();
-            
-            if (!_seenProgPoints[dutyId].Contains(actionId))
+            if (_seenProgPointsMirror.TryGetValue(dutyId, out var points) && points.Contains(actionId))
+                return;
+
+            var success = await _apiService.MarkProgPointCompletedAsync(dutyId, actionId);
+            if (success)
             {
-                _seenProgPoints[dutyId].Add(actionId);
-                wasAdded = true;
-                Svc.Log.Info($"📝 SAVED PROGRESS POINT: Action {actionId} for duty {dutyId} (Total: {_seenProgPoints[dutyId].Count} for this duty)");
+                if (!_seenProgPointsMirror.ContainsKey(dutyId))
+                {
+                    _seenProgPointsMirror[dutyId] = new HashSet<uint>();
+                }
+                _seenProgPointsMirror[dutyId].Add(actionId);
+                Svc.Log.Info($"Marked prog point {actionId} for duty {dutyId} as seen on server.");
             }
-            else
-            {
-                Svc.Log.Debug($"Progress point {actionId} already exists for duty {dutyId}, skipping");
-            }
-            
-            // Only sync if we actually added something new
-            if (wasAdded)
-            {
-                // Fire and forget sync - don't await to prevent blocking multiple rapid calls
-                _ = Task.Run(async () => await SyncWithServer());
-            }
-        }
-        catch (Exception ex)
-        {
-            Svc.Log.Error($"Error adding progress point {actionId} for duty {dutyId}: {ex.Message}");
         }
         finally
         {
             _progPointsSemaphore.Release();
         }
     }
-    
+
     /// <summary>
-    /// Check if a duty has been completed using real-time UIState check
+    /// Checks if a duty is completed using the local mirror, with a server fallback.
+    /// </summary>
+    public async Task<bool> IsDutyCompletedAsync(uint dutyId)
+    {
+        if (_completedDutiesMirror.Contains(dutyId)) return true;
+        
+        // Fallback to API check
+        var result = await _apiService.IsDutyCompletedAsync(dutyId);
+        if (result.HasValue && result.Value)
+        {
+            _completedDutiesMirror.Add(dutyId); // Update mirror
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Synchronous check using only the local mirror (for performance-critical paths)
     /// </summary>
     public bool IsDutyCompleted(uint dutyId)
     {
-        try
-        {
-            // First check cached data for performance
-            if (_completedDuties.Contains(dutyId))
-                return true;
-            
-            // Real-time check using UIState
-            var cfc = _contentFinderService.GetContentFinderCondition(dutyId);
-            if (cfc == null) return false;
-            
-            var instanceContentId = GetInstanceContentId(cfc.Value);
-            if (instanceContentId == 0) return false;
-            
-            var isCompleted = UIState.IsInstanceContentCompleted(instanceContentId);
-            
-            // Update cache if we found it's completed
-            if (isCompleted)
-            {
-                _completedDuties.Add(dutyId);
-            }
-            
-            return isCompleted;
-        }
-        catch (Exception ex)
-        {
-            Svc.Log.Error($"Failed to check duty completion for {dutyId}: {ex.Message}");
-            // Fallback to cached data
-            return _completedDuties.Contains(dutyId);
-        }
+        return _completedDutiesMirror.Contains(dutyId);
     }
-    
+
     /// <summary>
-    /// Check if a duty is unlocked using UIState
+    /// Checks if a progress point is completed using the local mirror, with a server fallback.
     /// </summary>
-    public bool IsDutyUnlocked(uint dutyId)
+    public async Task<bool> IsProgPointSeenAsync(uint dutyId, uint actionId)
     {
-        try
+        if (_seenProgPointsMirror.TryGetValue(dutyId, out var points) && points.Contains(actionId))
         {
-            var cfc = _contentFinderService.GetContentFinderCondition(dutyId);
-            if (cfc == null) return false;
-            
-            var instanceContentId = GetInstanceContentId(cfc.Value);
-            if (instanceContentId == 0) return false;
-            
-            return UIState.IsInstanceContentUnlocked(instanceContentId);
+            return true;
         }
-        catch (Exception ex)
+
+        // Fallback to API check
+        var result = await _apiService.IsProgPointCompletedAsync(dutyId, actionId);
+        if (result.HasValue && result.Value)
         {
-            Svc.Log.Error($"Failed to check duty unlock status for {dutyId}: {ex.Message}");
-            return false;
+            if (!_seenProgPointsMirror.ContainsKey(dutyId))
+            {
+                _seenProgPointsMirror[dutyId] = new HashSet<uint>();
+            }
+            _seenProgPointsMirror[dutyId].Add(actionId); // Update mirror
+            return true;
         }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Gets all completed prog points for a duty, intended for UI display.
+    /// </summary>
+    public async Task<List<uint>> GetCompletedProgPointsAsync(uint dutyId)
+    {
+        var points = await _apiService.GetCompletedProgPointsAsync(dutyId);
+        if (points != null)
+        {
+            // Update local mirror
+            _seenProgPointsMirror[dutyId] = new HashSet<uint>(points);
+            return points;
+        }
+        return new List<uint>();
     }
     
     /// <summary>
@@ -416,7 +253,7 @@ public class DutyProgressService : IDisposable
     /// </summary>
     public List<uint> GetSeenProgPoints(uint dutyId)
     {
-        return _seenProgPoints.GetValueOrDefault(dutyId, new List<uint>());
+        return _seenProgPointsMirror.GetValueOrDefault(dutyId, new HashSet<uint>()).ToList();
     }
     
     /// <summary>
@@ -424,7 +261,7 @@ public class DutyProgressService : IDisposable
     /// </summary>
     public bool HasSeenProgPoint(uint dutyId, uint actionId)
     {
-        return _seenProgPoints.ContainsKey(dutyId) && _seenProgPoints[dutyId].Contains(actionId);
+        return _seenProgPointsMirror.TryGetValue(dutyId, out var points) && points.Contains(actionId);
     }
     
     /// <summary>
@@ -432,7 +269,7 @@ public class DutyProgressService : IDisposable
     /// </summary>
     public int GetCompletedDutiesCount()
     {
-        return _completedDuties.Count;
+        return _completedDutiesMirror.Count;
     }
     
     /// <summary>
@@ -440,7 +277,7 @@ public class DutyProgressService : IDisposable
     /// </summary>
     public int GetProgPointsDutiesCount()
     {
-        return _seenProgPoints.Count;
+        return _seenProgPointsMirror.Count;
     }
     
     /// <summary>
@@ -448,7 +285,7 @@ public class DutyProgressService : IDisposable
     /// </summary>
     public int GetTotalProgPointsCount()
     {
-        return _seenProgPoints.Values.Sum(list => list.Count);
+        return _seenProgPointsMirror.Values.Sum(set => set.Count);
     }
     
     /// <summary>
@@ -456,16 +293,15 @@ public class DutyProgressService : IDisposable
     /// </summary>
     public IReadOnlySet<uint> GetCompletedDuties()
     {
-        return _completedDuties.ToHashSet();
+        return _completedDutiesMirror;
     }
     
     /// <summary>
-    /// Force a refresh of progress data from the game
+    /// Force a refresh of progress data from the server
     /// </summary>
     public async Task RefreshProgressData()
     {
-        await LoadProgressFromGame();
-        await SyncWithServer();
+        await RefreshLocalMirrorAsync();
     }
     
     /// <summary>
