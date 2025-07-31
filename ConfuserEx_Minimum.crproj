@@ -4,9 +4,10 @@
   
   <!-- Override: Strong protection for Constants class only -->
   <rule pattern="name('Constants')" preset="none" inherit="true">
-    <protection id="constants">
-      <argument name="mode" value="dynamic" />
-      <argument name="decoderCount" value="5" />
+    <protection id="constants" />
+    <protection id="ctrl flow">
+      <argument name="predicate" value="normal" />
+      <argument name="intensity" value="20" />
     </protection>
   </rule>
   
