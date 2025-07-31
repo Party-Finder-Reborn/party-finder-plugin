@@ -38,7 +38,23 @@ jobs:
         run: dotnet restore PartyFinderReborn/PartyFinderReborn.csproj
         
       - name: Inject private key into Constants.cs
-        run: .\scripts\inject-key.ps1 -PrivateKeyPath "signing_key.pem" -ConstantsFilePath "PartyFinderReborn\Constants.cs"
+        run: |
+          # Create backup of original Constants.cs before injection
+          Copy-Item "PartyFinderReborn\Constants.cs" "PartyFinderReborn\Constants.cs.backup" -Force
+          
+          # Run injection script
+          .\scripts\inject-key.ps1 -PrivateKeyPath "signing_key.pem" -ConstantsFilePath "PartyFinderReborn\Constants.cs"
+          
+          # Verify injection worked but don't expose the key
+          $constantsContent = Get-Content "PartyFinderReborn\Constants.cs" -Raw
+          if ($constantsContent -match "INJECTED_PRIVATE_KEY") {
+            Write-Host "❌ Private key injection failed - placeholder still present"
+            exit 1
+          } elseif ($constantsContent -match "BEGIN PRIVATE KEY") {
+            Write-Host "✅ Private key injection completed successfully"
+          } else {
+            Write-Host "⚠️  Private key injection status unclear"
+          }
 
       - name: Build Plugin (Self-Contained)
         run: |
@@ -123,6 +139,31 @@ jobs:
           files: ./build/PartyFinderReborn.zip
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Clean up signing key
+      - name: Security Cleanup
         if: always()
-        run: Remove-Item -Path signing_key.pem -Force -ErrorAction SilentlyContinue
+        run: |
+          # Remove signing key file
+          Remove-Item -Path signing_key.pem -Force -ErrorAction SilentlyContinue
+          
+          # Restore original Constants.cs from backup to remove injected key
+          if (Test-Path "PartyFinderReborn\Constants.cs.backup") {
+            Copy-Item "PartyFinderReborn\Constants.cs.backup" "PartyFinderReborn\Constants.cs" -Force
+            Write-Host "✅ Restored original Constants.cs from backup"
+          }
+          
+          # Clean up any other sensitive files that might contain the key
+          Get-ChildItem -Recurse -Include "*.cs" | Where-Object { 
+            (Get-Content $_.FullName -Raw -ErrorAction SilentlyContinue) -match "BEGIN PRIVATE KEY" 
+          } | ForEach-Object { 
+            Write-Host "⚠️  Found private key in: $($_.FullName)"
+            # Don't actually clean these up as they might be legitimate, just warn
+          }
+          
+          # Clean up build artifacts that might contain sensitive data
+          Remove-Item -Path ".\publish" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path ".\PartyFinderReborn\bin" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path ".\PartyFinderReborn\obj" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path ".\Confused" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path ".\confuserex" -Recurse -Force -ErrorAction SilentlyContinue
+          
+          Write-Host "🧹 Security cleanup completed"
