@@ -110,7 +110,7 @@ jobs:
       - name: Prepare Release Files
         run: |
           # Copy obfuscated DLL back to build directory
-          Copy-Item ".\Confused\PartyFinderReborn.dll" ".\build\PartyFinderReborn.dll" -Force
+          Copy-Item ".\PartyFinderReborn\bin\Release\Confused\PartyFinderReborn.dll" ".\build\PartyFinderReborn.dll" -Force
           # Copy plugin manifest
           Copy-Item ".\PartyFinderReborn\PartyFinderReborn.json" ".\build\PartyFinderReborn.json" -Force
 
