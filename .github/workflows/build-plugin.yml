@@ -51,6 +51,8 @@ jobs:
 
       - name: Obfuscate Plugin
         run: |
+          # Create directory structure for ConfuserEx
+          New-Item -ItemType Directory -Path ".\PartyFinderReborn\bin\Release" -Force
           # Copy built DLL to expected location for ConfuserEx
           Copy-Item ".\build\PartyFinderReborn.dll" ".\PartyFinderReborn\bin\Release\PartyFinderReborn.dll" -Force
           # Run obfuscation
