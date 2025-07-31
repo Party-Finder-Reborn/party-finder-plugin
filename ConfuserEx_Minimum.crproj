@@ -1,6 +1,16 @@
 <project outputDir="./Confused" baseDir="./PartyFinderReborn/bin/Release">
-  <rule pattern="true" preset="minimum" inherit="false">
+  <rule pattern="true" preset="none" inherit="false">
     <protection id="rename" />
+    <protection id="constants">
+      <argument name="mode" value="dynamic" />
+      <argument name="decoderCount" value="5" />
+    </protection>
+    <protection id="ctrl flow">
+      <argument name="predicate" value="expression" />
+      <argument name="intensity" value="60" />
+    </protection>
+    <protection id="anti debug" />
+    <protection id="anti dump" />
   </rule>
   <module path="PartyFinderReborn.dll" />
   <probePath>.</probePath>
