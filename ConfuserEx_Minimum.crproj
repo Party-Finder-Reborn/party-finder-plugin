@@ -1,22 +1,12 @@
 <project outputDir="./Confused" baseDir="./PartyFinderReborn/bin/Release">
-  <!-- Default rule: No protection for most classes to preserve Dalamud compatibility -->
+  <!-- Default: No protection for everything -->
   <rule pattern="true" preset="none" inherit="false" />
   
-  <!-- Specific rule: Strong protection ONLY for Constants class -->
-  <rule pattern="name('Constants')" preset="none" inherit="false">
+  <!-- Override: Strong protection for Constants class only -->
+  <rule pattern="name('Constants')" preset="none" inherit="true">
     <protection id="constants">
       <argument name="mode" value="dynamic" />
       <argument name="decoderCount" value="5" />
-    </protection>
-    <protection id="ctrl flow">
-      <argument name="predicate" value="expression" />
-      <argument name="intensity" value="40" />
-    </protection>
-    <protection id="rename">
-      <argument name="mode" value="unicode" />
-      <argument name="renField" value="true" />
-      <argument name="renMethod" value="true" />
-      <argument name="renProperty" value="true" />
     </protection>
   </rule>
   
