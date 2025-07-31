@@ -23,14 +23,20 @@ public static class Constants
     public const string ProgressBase = "/api/v1/progress";
     
     // ECDSA Signing Configuration
-    // This value will be injected by GitHub Actions during build via MSBuild property
+    // This method will have its string obfuscated by ConfuserEx
+    public static string GetPrivateKey()
+    {
 #if RELEASE_BUILD
-    public static readonly string PrivateKey = "INJECTED_PRIVATE_KEY";
+        return "INJECTED_PRIVATE_KEY";
 #else
-    public static readonly string PrivateKey = @"-----BEGIN PRIVATE KEY-----
+        return @"-----BEGIN PRIVATE KEY-----
 MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgPLmCaPsaIe6DeKDM
 +Wyt4Ja/jmj3Cy1EOqyZF+UyIBahRANCAATIGqD1KTbHLwiCjFjTrhhZpTtp29KH
 0JjNLxA1HFpg1qp0+Wd2PzHHkohREq/jwr5XzArNTzrOfQZ21MXVX/Tf
 -----END PRIVATE KEY-----";
 #endif
+    }
+    
+    // Cached property for backward compatibility
+    public static string PrivateKey => GetPrivateKey();
 }

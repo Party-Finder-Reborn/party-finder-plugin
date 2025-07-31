@@ -4,14 +4,8 @@
   
   <!-- Override: String encryption for Constants class only -->
   <rule pattern="name('Constants')" preset="none" inherit="true">
-    <protection id="encrypt string">
-      <argument name="mode" value="dynamic" />
-      <argument name="decoderCount" value="5" />
-    </protection>
-    <protection id="ctrl flow">
-      <argument name="predicate" value="normal" />
-      <argument name="intensity" value="20" />
-    </protection>
+    <protection id="constants" />
+    <protection id="ctrl flow" />
   </rule>
   
   <module path="PartyFinderReborn.dll" />
