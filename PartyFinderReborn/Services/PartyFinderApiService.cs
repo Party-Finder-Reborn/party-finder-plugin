@@ -9,6 +9,7 @@ using System.Text;
 using Newtonsoft.Json;
 using ECommons.DalamudServices;
 using PartyFinderReborn.Models;
+using PartyFinderReborn.Crypto;
 
 namespace PartyFinderReborn.Services;
 
@@ -17,7 +18,7 @@ namespace PartyFinderReborn.Services;
 /// </summary>
 public class PartyFinderApiService : IDisposable
 {
-    private readonly HttpClient _httpClient;
+    private readonly SignedHttpClient _httpClient;
     private readonly Configuration _configuration;
     private static readonly ConcurrentDictionary<string, object> _cache = new();
     private static readonly TimeSpan _cacheDuration = TimeSpan.FromMinutes(5);
@@ -25,14 +26,7 @@ public class PartyFinderApiService : IDisposable
     public PartyFinderApiService(Configuration configuration)
     {
         _configuration = configuration;
-        _httpClient = new HttpClient();
-        _httpClient.DefaultRequestHeaders.Add("User-Agent", Constants.UserAgent);
-        
-        // Set API key if available
-        if (!string.IsNullOrEmpty(configuration.ApiKey))
-        {
-            _httpClient.DefaultRequestHeaders.Add("Authorization", $"ApiKey {configuration.ApiKey}");
-        }
+        _httpClient = new SignedHttpClient(configuration);
     }
     
     /// <summary>
@@ -64,12 +58,7 @@ public class PartyFinderApiService : IDisposable
             if (response.IsSuccessStatusCode)
             {
                 var json = await response.Content.ReadAsStringAsync();
-                Svc.Log.Debug($"User profile API response: {json}");
                 var userProfile = JsonConvert.DeserializeObject<UserProfile>(json);
-                if (userProfile != null)
-                {
-                    Svc.Log.Debug($"Deserialized user profile for {userProfile.DisplayName}");
-                }
                 return userProfile;
             }
             
@@ -267,7 +256,6 @@ public class PartyFinderApiService : IDisposable
         try
         {
             var json = JsonConvert.SerializeObject(listing);
-            Svc.Log.Debug($"Creating listing with data: {json}");
             var content = new StringContent(json, Encoding.UTF8, "application/json");
             
             var response = await _httpClient.PostAsync($"{Constants.ApiBaseUrl}/api/v1/listings/", content);
@@ -275,12 +263,7 @@ public class PartyFinderApiService : IDisposable
             if (response.IsSuccessStatusCode)
             {
                 var responseJson = await response.Content.ReadAsStringAsync();
-                Svc.Log.Debug($"Create listing API response: {responseJson}");
                 var result = JsonConvert.DeserializeObject<PartyListing>(responseJson);
-                if (result != null)
-                {
-                    Svc.Log.Debug($"Deserialized listing - ID: {result.Id}, CurrentSize: {result.CurrentSize}, Participants: [{string.Join(", ", result.Participants)}]");
-                }
                 return result;
             }
             
@@ -305,7 +288,6 @@ public class PartyFinderApiService : IDisposable
         try
         {
             var json = JsonConvert.SerializeObject(listing);
-            Svc.Log.Debug($"Updating listing {id} with data: {json}");
             var content = new StringContent(json, Encoding.UTF8, "application/json");
             
             var response = await _httpClient.PutAsync($"{Constants.ApiBaseUrl}/api/v1/listings/{id}/", content);
@@ -313,12 +295,7 @@ public class PartyFinderApiService : IDisposable
             if (response.IsSuccessStatusCode)
             {
                 var responseJson = await response.Content.ReadAsStringAsync();
-                Svc.Log.Debug($"Update listing API response: {responseJson}");
                 var result = JsonConvert.DeserializeObject<PartyListing>(responseJson);
-                if (result != null)
-                {
-                    Svc.Log.Debug($"Deserialized updated listing - ID: {result.Id}, CurrentSize: {result.CurrentSize}, Participants: [{string.Join(", ", result.Participants)}]");
-                }
                 return result;
             }
             
