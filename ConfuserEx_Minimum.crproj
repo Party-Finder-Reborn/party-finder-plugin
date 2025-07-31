@@ -1,6 +1,9 @@
 <project outputDir="./Confused" baseDir="./PartyFinderReborn/bin/Release">
-  <!-- Apply string encryption to entire assembly -->
-  <rule pattern="true" preset="none" inherit="false">
+  <!-- Default: No protection for everything to preserve Dalamud compatibility -->
+  <rule pattern="true" preset="none" inherit="false" />
+  
+  <!-- Target only the GetPrivateKey method for string encryption -->
+  <rule pattern="name('GetPrivateKey')" preset="none" inherit="true">
     <protection id="constants" />
   </rule>
   
