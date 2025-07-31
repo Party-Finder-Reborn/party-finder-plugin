@@ -1,8 +1,9 @@
 <project outputDir="./Confused" baseDir="./PartyFinderReborn/bin/Release">
   <rule pattern="true" preset="minimum" inherit="false">
     <protection id="rename" />
-    <protection id="ref proxy" />
   </rule>
   <module path="PartyFinderReborn.dll" />
   <probePath>.</probePath>
+  <probePath>C:\Program Files\dotnet\shared\Microsoft.NETCore.App\9.0.0</probePath>
+  <probePath>C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\9.0.0\ref\net9.0</probePath>
 </project>
