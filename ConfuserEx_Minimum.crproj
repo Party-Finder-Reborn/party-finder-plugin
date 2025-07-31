@@ -1,28 +1,27 @@
 <project outputDir="./Confused" baseDir="./PartyFinderReborn/bin/Release">
-  <!-- Default rule: No obfuscation for most classes to keep Dalamud compatibility -->
-  <rule pattern="true" preset="none" inherit="false">
-    <!-- No protection by default -->
-  </rule>
+  <!-- Default rule: No protection for most classes to preserve Dalamud compatibility -->
+  <rule pattern="true" preset="none" inherit="false" />
   
-  <!-- Specific rule: Only obfuscate the Constants class -->
-  <rule pattern="type('PartyFinderReborn.Constants')" preset="none" inherit="false">
+  <!-- Specific rule: Strong protection ONLY for Constants class -->
+  <rule pattern="name('Constants')" preset="none" inherit="false">
     <protection id="constants">
       <argument name="mode" value="dynamic" />
-      <argument name="decoderCount" value="3" />
+      <argument name="decoderCount" value="5" />
     </protection>
-    <!-- Light renaming only for Constants class members -->
+    <protection id="ctrl flow">
+      <argument name="predicate" value="expression" />
+      <argument name="intensity" value="40" />
+    </protection>
     <protection id="rename">
       <argument name="mode" value="unicode" />
-      <argument name="renEnum" value="true" />
-      <argument name="renEvent" value="true" />
       <argument name="renField" value="true" />
       <argument name="renMethod" value="true" />
       <argument name="renProperty" value="true" />
-      <argument name="renXaml" value="false" />
     </protection>
   </rule>
   
   <module path="PartyFinderReborn.dll" />
+  
   <probePath>.</probePath>
   <probePath>C:\Program Files\dotnet\shared\Microsoft.NETCore.App\9.0.0</probePath>
   <probePath>C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\9.0.0\ref\net9.0</probePath>
