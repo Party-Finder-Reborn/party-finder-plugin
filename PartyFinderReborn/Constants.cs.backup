@@ -8,7 +8,7 @@ public static class Constants
 #if DEBUG
     public const string ApiBaseUrl = "http://localhost:8080";
 #else
-    public const string ApiBaseUrl = "https://your-production-domain.com";
+    public const string ApiBaseUrl = "https://partyfinder.nostrathomas.net";
 #endif
 
     // Plugin Information
