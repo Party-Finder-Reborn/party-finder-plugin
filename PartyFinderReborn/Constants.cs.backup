@@ -25,12 +25,12 @@ public static class Constants
     // ECDSA Signing Configuration
     // This value will be injected by GitHub Actions during build via MSBuild property
 #if RELEASE_BUILD
-    public const string PrivateKey = "INJECTED_PRIVATE_KEY";
+    public static readonly string PrivateKey = "INJECTED_PRIVATE_KEY";
 #else
-    public const string PrivateKey = @"-----BEGIN PRIVATE KEY-----
+    public static readonly string PrivateKey = @"-----BEGIN PRIVATE KEY-----
 MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgPLmCaPsaIe6DeKDM
 +Wyt4Ja/jmj3Cy1EOqyZF+UyIBahRANCAATIGqD1KTbHLwiCjFjTrhhZpTtp29KH
-0JjNLxA1HFpg1qp0+Wd2PzHHkohREq/jwr5XzArNTzrOfQZ21MXVX/Tf
+0JjNLxA1HFpg1qp0+Wd2PzHHkohREq/jwar5XzArNTzrOfQZ21MXVX/Tf
 -----END PRIVATE KEY-----";
 #endif
 }
