@@ -1,7 +1,7 @@
-&lt;project outputDir="./Confused" baseDir="./PartyFinderReborn/bin/Release"&gt;
-  &lt;rule pattern="true" preset="minimum" inherit="false"&gt;
-    &lt;protection id="rename" /&gt;
-    &lt;protection id="ref proxy" /&gt;
-  &lt;/rule&gt;
-  &lt;module path="PartyFinderReborn.dll" /&gt;
-&lt;/project&gt;
+<project outputDir="./Confused" baseDir="./PartyFinderReborn/bin/Release">
+  <rule pattern="true" preset="minimum" inherit="false">
+    <protection id="rename" />
+    <protection id="ref proxy" />
+  </rule>
+  <module path="PartyFinderReborn.dll" />
+</project>
