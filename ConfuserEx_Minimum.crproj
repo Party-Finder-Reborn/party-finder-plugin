@@ -4,4 +4,5 @@
     <protection id="ref proxy" />
   </rule>
   <module path="PartyFinderReborn.dll" />
+  <probePath>.</probePath>
 </project>

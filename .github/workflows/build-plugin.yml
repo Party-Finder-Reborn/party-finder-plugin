@@ -55,6 +55,19 @@ jobs:
           New-Item -ItemType Directory -Path ".\PartyFinderReborn\bin\Release" -Force
           # Copy built DLL to expected location for ConfuserEx
           Copy-Item ".\build\PartyFinderReborn.dll" ".\PartyFinderReborn\bin\Release\PartyFinderReborn.dll" -Force
+          
+          # Copy all dependencies for ConfuserEx resolution
+          # Copy Dalamud assemblies from the dev installation
+          $dalamudPath = "$env:AppData\XIVLauncher\addon\Hooks\dev"
+          if (Test-Path "$dalamudPath\Dalamud.dll") {
+            Copy-Item "$dalamudPath\*.dll" ".\PartyFinderReborn\bin\Release\" -Force -ErrorAction SilentlyContinue
+          }
+          
+          # Copy NuGet package dependencies from build output
+          if (Test-Path ".\build\*.dll") {
+            Get-ChildItem ".\build\*.dll" | Where-Object { $_.Name -ne "PartyFinderReborn.dll" } | Copy-Item -Destination ".\PartyFinderReborn\bin\Release\" -Force
+          }
+          
           # Run obfuscation
           .\confuserex\Confuser.CLI.exe -n ConfuserEx_Minimum.crproj
 
