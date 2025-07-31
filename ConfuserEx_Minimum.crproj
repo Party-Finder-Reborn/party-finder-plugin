@@ -1,11 +1,7 @@
 <project outputDir="./Confused" baseDir="./PartyFinderReborn/bin/Release">
-  <!-- Default: No protection for everything -->
-  <rule pattern="true" preset="none" inherit="false" />
-  
-  <!-- Override: String encryption for Constants class only -->
-  <rule pattern="name('Constants')" preset="none" inherit="true">
+  <!-- Apply string encryption to entire assembly -->
+  <rule pattern="true" preset="none" inherit="false">
     <protection id="constants" />
-    <protection id="ctrl flow" />
   </rule>
   
   <module path="PartyFinderReborn.dll" />
