@@ -363,45 +363,49 @@ public sealed class Plugin : IDalamudPlugin
             return;
         }
 
-        try
+        // Execute the party invite on the framework thread
+        Svc.Framework.RunOnFrameworkThread(() =>
         {
-            var infoModule = InfoModule.Instance();
-            if (infoModule == null)
+            try
             {
-                Svc.Chat.PrintError("Failed to access InfoModule.");
-                return;
-            }
+                var infoModule = InfoModule.Instance();
+                if (infoModule == null)
+                {
+                    Svc.Chat.PrintError("Failed to access InfoModule.");
+                    return;
+                }
 
-            var partyInviteProxy = (InfoProxyPartyInvite*)infoModule->GetInfoProxyById(InfoProxyId.PartyInvite);
-            if (partyInviteProxy == null)
-            {
-                Svc.Chat.PrintError("Failed to access PartyInvite proxy.");
-                return;
-            }
+                var partyInviteProxy = (InfoProxyPartyInvite*)infoModule->GetInfoProxyById(InfoProxyId.PartyInvite);
+                if (partyInviteProxy == null)
+                {
+                    Svc.Chat.PrintError("Failed to access PartyInvite proxy.");
+                    return;
+                }
 
-            // Try to invite by character name and world
-            var worldId = GetWorldIdFromName(characterWorld);
-            if (worldId == 0)
-            {
-                Svc.Chat.PrintError($"Unknown world: {characterWorld}");
-                return;
-            }
+                // Try to invite by character name and world
+                var worldId = GetWorldIdFromName(characterWorld);
+                if (worldId == 0)
+                {
+                    Svc.Chat.PrintError($"Unknown world: {characterWorld}");
+                    return;
+                }
 
-            var success = partyInviteProxy->InviteToParty(0, characterName, worldId);
-            if (success)
-            {
-                Svc.Chat.Print($"Party invitation sent to {characterName}@{characterWorld}.");
+                var success = partyInviteProxy->InviteToParty(0, characterName, worldId);
+                if (success)
+                {
+                    Svc.Chat.Print($"Party invitation sent to {characterName}@{characterWorld}.");
+                }
+                else
+                {
+                    Svc.Chat.PrintError($"Failed to send party invitation to {characterName}@{characterWorld}.");
+                }
             }
-            else
+            catch (Exception ex)
             {
-                Svc.Chat.PrintError($"Failed to send party invitation to {characterName}@{characterWorld}.");
+                Svc.Chat.PrintError($"Error sending party invitation: {ex.Message}");
+                Svc.Log.Error($"Error in InvitePlayerToParty: {ex}");
             }
-        }
-        catch (Exception ex)
-        {
-            Svc.Chat.PrintError($"Error sending party invitation: {ex.Message}");
-            Svc.Log.Error($"Error in InvitePlayerToParty: {ex}");
-        }
+        });
     }
 
     private ushort GetWorldIdFromName(string worldName)

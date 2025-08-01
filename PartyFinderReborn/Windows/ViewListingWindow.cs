@@ -2,6 +2,7 @@
 using System;
 using System.Linq;
 using System.Numerics;
+using System.Threading.Tasks;
 using Dalamud.Interface;
 using Dalamud.Interface.Colors;
 using Dalamud.Interface.Components;
@@ -331,8 +332,8 @@ if (ImGui.Button(IsJoining ? "Joining..." : "Join Party", new Vector2(100, 0))) 
                     }
                 }
                 
-                // Refresh button
-                ImGui.SameLine(ImGui.GetContentRegionMax().X - 220);
+// Refresh button
+                ImGui.SameLine(ImGui.GetContentRegionMax().X - 160);
                 ImGui.BeginDisabled(IsRefreshing);
                 if (ImGui.Button(IsRefreshing ? "Refreshing..." : "Refresh", new Vector2(80, 0))) { _ = RefreshListingAsync(); }
                 ImGui.EndDisabled();
@@ -351,7 +352,7 @@ if (ImGui.Button(IsJoining ? "Joining..." : "Join Party", new Vector2(100, 0))) 
                 }
 
                 // Close button
-                ImGui.SameLine();
+                ImGui.SameLine(ImGui.GetContentRegionMax().X - 40);
                 if (ImGui.Button("Close", new Vector2(60, 0)))
                 {
                     IsOpen = false;
@@ -443,21 +444,29 @@ if (ImGui.Button(IsJoining ? "Joining..." : "Join Party", new Vector2(100, 0))) 
                 ImGuiEx.PluginAvailabilityIndicator(new[] { pluginInfo });
             }
         }
-        private void SendInGamePartyJoinRequest()
+private void SendInGamePartyJoinRequest()
         {
+            string characterName = null;
+            string worldName = null;
+
+            // Fetch character information on framework thread
+            Svc.Framework.RunOnFrameworkThread(() =>
+            {
+                characterName = Svc.ClientState.LocalPlayer?.Name.TextValue;
+                worldName = Svc.ClientState.LocalPlayer?.CurrentWorld.Value.Name.ExtractText();
+            });
+
+            if (characterName == null || worldName == null)
+            {
+                Svc.Chat.PrintError("Failed to get character information for party request.");
+                return;
+            }
+
+            // Fire and forget the task
             _ = Task.Run(async () =>
             {
                 try
                 {
-                    var characterName = Svc.ClientState.LocalPlayer?.Name.TextValue;
-                var worldName = Svc.ClientState.LocalPlayer?.CurrentWorld.Value.Name.ExtractText();
-
-                    if (characterName == null || worldName == null)
-                    {
-                        Svc.Chat.PrintError("Failed to get character information for party request.");
-                        return;
-                    }
-
                     var response = await Plugin.ApiService.SendInvitationAsync(
                         Listing.Id,
                         "Request to join in-game party.",
