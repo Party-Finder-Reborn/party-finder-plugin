@@ -113,7 +113,7 @@ public class MainWindow : Window, IDisposable
             IsLoading = true;
             var response = await Plugin.ApiService.GetListingsAsync(CurrentFilters, pageUrl);
             
-            if (response != null)
+if (response != null)
             {
                 _currentResponse = response;
                 PartyListings = response.Results;
@@ -123,6 +123,15 @@ public class MainWindow : Window, IDisposable
                 
                 ApplyFilters();
                 LastRefresh = DateTime.Now;
+
+                // Start notification workers for listings where the current user is the owner
+                foreach (var listing in PartyListings)
+                {
+                    if (listing.IsOwner)
+                    {
+                        Plugin.StartJoinNotificationWorker(listing.Id);
+                    }
+                }
             }
         }
         catch (Exception ex)

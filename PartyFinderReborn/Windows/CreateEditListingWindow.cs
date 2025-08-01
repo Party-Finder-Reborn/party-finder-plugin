@@ -574,7 +574,13 @@ namespace PartyFinderReborn.Windows
                     var wasCreateMode = IsCreateMode;
                     IsCreateMode = false;
                     
-                    Svc.Log.Info($"Successfully {(wasCreateMode ? "created" : "updated")} listing for duty {dutyName} (ID: {Listing.Id}, CurrentSize: {Listing.CurrentSize})");
+Svc.Log.Info($"Successfully {(wasCreateMode ? "created" : "updated")} listing for duty {dutyName} (ID: {Listing.Id}, CurrentSize: {Listing.CurrentSize})");
+
+                    // Start notification worker for newly created listings
+                    if (wasCreateMode)
+                    {
+                        Plugin.StartJoinNotificationWorker(Listing.Id);
+                    }
 
                     IsOpen = false;
                 }
