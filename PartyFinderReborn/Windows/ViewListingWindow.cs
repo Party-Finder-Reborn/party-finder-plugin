@@ -455,8 +455,8 @@ if (ImGui.Button(IsJoining ? "Joining..." : "Join Party", new Vector2(100, 0))) 
         }
 private void SendInGamePartyJoinRequest()
         {
-            string characterName = null;
-            string worldName = null;
+            string? characterName = null;
+            string? worldName = null;
 
             // Fetch character information on framework thread
             Svc.Framework.RunOnFrameworkThread(() =>

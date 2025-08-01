@@ -406,28 +406,8 @@ public sealed class Plugin : IDalamudPlugin
                     Svc.Chat.Print($"Party invitation sent to {characterName}@{characterWorld}.");
                     
                     // Dismiss the notification from the server after successful invite
-                    if (!string.IsNullOrEmpty(notificationId))
-                    {
-                        _ = Task.Run(async () =>
-                        {
-                            try
-                            {
-                                var dismissed = await ApiService.DismissInvitationAsync(notificationId);
-                                if (dismissed)
-                                {
-                                    Svc.Log.Info($"Successfully dismissed notification {notificationId} from server");
-                                }
-                                else
-                                {
-                                    Svc.Log.Warning($"Failed to dismiss notification {notificationId} from server");
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                Svc.Log.Error($"Error dismissing notification {notificationId}: {ex.Message}");
-                            }
-                        });
-                    }
+                    // We need to do this outside the unsafe context
+                    DismissNotificationAfterInvite(notificationId);
                 }
                 else
                 {
@@ -454,6 +434,32 @@ public sealed class Plugin : IDalamudPlugin
             Svc.Log.Error($"Error getting world ID for {worldName}: {ex.Message}");
             return 0;
         }
+    }
+    
+    private void DismissNotificationAfterInvite(string? notificationId)
+    {
+        if (string.IsNullOrEmpty(notificationId))
+            return;
+            
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var dismissed = await ApiService.DismissInvitationAsync(notificationId);
+                if (dismissed)
+                {
+                    Svc.Log.Info($"Successfully dismissed notification {notificationId} from server");
+                }
+                else
+                {
+                    Svc.Log.Warning($"Failed to dismiss notification {notificationId} from server");
+                }
+            }
+            catch (Exception ex)
+            {
+                Svc.Log.Error($"Error dismissing notification {notificationId}: {ex.Message}");
+            }
+        });
     }
     
     private void OnConfigurationUpdated()
