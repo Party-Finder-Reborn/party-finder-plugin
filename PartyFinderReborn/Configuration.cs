@@ -8,6 +8,9 @@ namespace PartyFinderReborn;
 public class Configuration : IPluginConfiguration
 {
     public int Version { get; set; } = 0;
+    
+    // Event that fires when configuration is updated
+    public event Action? ConfigUpdated;
 
     // UI Configuration
     public bool ShowMainWindow { get; set; } = false;
@@ -36,5 +39,8 @@ public class Configuration : IPluginConfiguration
     public void Save()
     {
         Svc.PluginInterface.SavePluginConfig(this);
+        
+        // Fire the ConfigUpdated event after saving
+        ConfigUpdated?.Invoke();
     }
 }

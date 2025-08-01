@@ -7,6 +7,9 @@ using PartyFinderReborn.Models;
 using System.Collections.Generic;
 using ECommons.DalamudServices;
 using System.Threading.Tasks;
+using Dalamud.Interface;
+using Dalamud.Interface.Components;
+using PartyFinderReborn.Utils;
 
 namespace PartyFinderReborn.Windows;
 
@@ -68,6 +71,38 @@ public class MainWindow : Window, IDisposable
         {
             Svc.Log.Error($"Failed to load user data: {ex.Message}");
             ConnectionStatus = "Error fetching user data";
+            CurrentUserProfile = null; // Clear profile on error
+        }
+    }
+    
+    /// <summary>
+    /// Refresh all authentication-dependent data - used when API key changes
+    /// </summary>
+    public async Task RefreshAllAuthenticatedDataAsync()
+    {
+        try
+        {
+            // Reset state
+            CurrentUserProfile = null;
+            PartyListings.Clear();
+            FilteredListings.Clear();
+            PopularTags.Clear();
+            _nextPageUrl = null;
+            _prevPageUrl = null;
+            _totalCount = 0;
+            _currentResponse = null;
+            
+            // Reload all data that requires authentication
+            await LoadUserDataAsync();
+            await LoadPartyListingsAsync();
+            await LoadPopularTagsAsync();
+            
+            // Trigger duty progress refresh through the plugin
+            _ = Plugin.DutyProgressService.RefreshProgressData();
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Failed to refresh authenticated data: {ex.Message}");
         }
     }
 
@@ -337,7 +372,7 @@ public class MainWindow : Window, IDisposable
         // Draw loading spinner overlay if loading
         if (IsLoading)
         {
-            DrawLoadingSpinner();
+            LoadingHelper.DrawLoadingSpinner();
         }
     }
 
@@ -375,7 +410,7 @@ public class MainWindow : Window, IDisposable
         ImGui.Columns(1);
         
         // Action buttons
-        if (ImGui.Button("🔄 Refresh Listings"))
+        if (ImGuiComponents.IconButton(FontAwesomeIcon.Sync))
         {
             // Reset pagination state on refresh
             _nextPageUrl = null;
@@ -386,11 +421,19 @@ public class MainWindow : Window, IDisposable
             _ = LoadPartyListingsAsync();
             _ = LoadPopularTagsAsync(); // Also refresh popular tags
         }
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("Refresh Listings");
+        }
         
         ImGui.SameLine();
-        if (ImGui.Button("➕ Create Listing"))
+        if (ImGuiComponents.IconButton(FontAwesomeIcon.Plus))
         {
             OpenCreateListingWindow();
+        }
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("Create Listing");
         }
 
         ImGui.SameLine();
@@ -424,7 +467,7 @@ public class MainWindow : Window, IDisposable
         
         // Datacenter filter with safe guards against missing world lists
         var datacenters = Plugin.WorldService.GetAllDatacenters();
-        var datacenterItems = new[] { "All" }.Concat(datacenters.Select(dc => dc.Name.ToString())).ToArray();
+        var datacenterItems = new[] { "All" }.Concat(datacenters.Select(dc => dc.Name.ExtractText())).ToArray();
         var currentDatacenterIndex = 0;
         
         if (!string.IsNullOrEmpty(CurrentFilters.Datacenter))
@@ -432,7 +475,7 @@ public class MainWindow : Window, IDisposable
             var currentDc = Plugin.WorldService.GetDatacenterByName(CurrentFilters.Datacenter);
             if (currentDc.HasValue)
             {
-                var dcName = currentDc.Value.Name.ToString();
+                var dcName = currentDc.Value.Name.ExtractText();
                 currentDatacenterIndex = Array.IndexOf(datacenterItems, dcName);
                 // Guard against missing datacenter - reset safely
                 if (currentDatacenterIndex == -1) 
@@ -454,10 +497,10 @@ public class MainWindow : Window, IDisposable
             else
             {
                 var selectedDatacenterName = datacenterItems[currentDatacenterIndex];
-                var selectedDatacenter = datacenters.FirstOrDefault(dc => dc.Name.ToString() == selectedDatacenterName);
+                var selectedDatacenter = datacenters.FirstOrDefault(dc => dc.Name.ExtractText() == selectedDatacenterName);
                 if (!selectedDatacenter.Equals(default(Lumina.Excel.Sheets.WorldDCGroupType)))
                 {
-                    CurrentFilters.Datacenter = Plugin.WorldService.GetApiDatacenterName(selectedDatacenter.Name.ToString());
+                    CurrentFilters.Datacenter = Plugin.WorldService.GetApiDatacenterName(selectedDatacenter.Name.ExtractText());
                     // When datacenter changes, reset world filter to prevent invalid world selections
                     CurrentFilters.World = null;
                 }
@@ -654,9 +697,13 @@ public class MainWindow : Window, IDisposable
         // Left: Previous button
         var hasPrevious = !string.IsNullOrEmpty(_prevPageUrl);
         if (!hasPrevious) ImGui.BeginDisabled();
-        if (ImGui.Button("◀ Previous") && hasPrevious)
+        if (ImGuiComponents.IconButton(FontAwesomeIcon.AngleLeft) && hasPrevious)
         {
             _ = LoadPartyListingsPageAsync(_prevPageUrl);
+        }
+        if (ImGui.IsItemHovered() && hasPrevious)
+        {
+            ImGui.SetTooltip("Previous Page");
         }
         if (!hasPrevious) ImGui.EndDisabled();
         
@@ -674,34 +721,25 @@ public class MainWindow : Window, IDisposable
         
         // Right: Next button
         var hasNext = !string.IsNullOrEmpty(_nextPageUrl);
-        var buttonSize = ImGui.CalcTextSize("Next ▶");
         var nextColumnWidth = ImGui.GetColumnWidth();
+        var buttonSize = new Vector2(ImGui.GetFrameHeight()); // Square button size
         var buttonPosX = nextColumnWidth - buttonSize.X - 20; // 20 for padding
         if (buttonPosX > 0) ImGui.SetCursorPosX(ImGui.GetCursorPosX() + buttonPosX);
         
         if (!hasNext) ImGui.BeginDisabled();
-        if (ImGui.Button("Next ▶") && hasNext)
+        if (ImGuiComponents.IconButton(FontAwesomeIcon.AngleRight) && hasNext)
         {
             _ = LoadPartyListingsPageAsync(_nextPageUrl);
+        }
+        if (ImGui.IsItemHovered() && hasNext)
+        {
+            ImGui.SetTooltip("Next Page");
         }
         if (!hasNext) ImGui.EndDisabled();
         
         ImGui.Columns(1);
     }
     
-    private void DrawLoadingSpinner()
-    {
-        var center = ImGui.GetIO().DisplaySize / 2;
-        var drawList = ImGui.GetForegroundDrawList();
-        var spinnerColor = ImGui.GetColorU32(ImGuiCol.ButtonHovered);
-        var backgroundColor = ImGui.GetColorU32(ImGuiCol.FrameBg, 0.7f);
-        var radius = 30;
-        var thickness = 5;
-        
-        drawList.AddCircleFilled(center, radius + 5, backgroundColor);
-        drawList.PathArcTo(center, radius, (float)(Math.PI * 0.5f * (Environment.TickCount / 100 % 4)), (float)(Math.PI * 0.5f * (Environment.TickCount / 100 % 4)) + (float)(Math.PI * 1.5f), 32);
-        drawList.PathStroke(spinnerColor, ImDrawFlags.None, thickness);
-    }
     
     /// <summary>
     /// Reset pagination state and reload listings from the first page

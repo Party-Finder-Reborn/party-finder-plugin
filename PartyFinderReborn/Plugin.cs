@@ -71,17 +71,16 @@ public sealed class Plugin : IDalamudPlugin
             HelpMessage = "Opens the Party Finder Reborn interface"
         });
         
-        Svc.Commands.AddHandler(RefreshCommandName, new CommandInfo(OnRefreshCommand)
+        // Add alias for easier command access
+        const string AliasCommandName = "/pfr";
+        Svc.Commands.AddHandler(AliasCommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "Refreshes duty progress data from the game"
+            HelpMessage = "Opens the Party Finder Reborn interface"
         });
         
-        Svc.Commands.AddHandler(DebugCommandName, new CommandInfo(OnDebugCommand)
-        {
-            HelpMessage = "Shows debug information about duty progress"
-        });
         
-        Svc.Commands.AddHandler(ConfigCommandName, new CommandInfo(OnConfigCommand)
+        // Handling config through main cmd
+        Svc.Commands.AddHandler(ConfigCommandName, new CommandInfo(OnCommand)
         {
             HelpMessage = "Opens the Party Finder Reborn configuration window"
         });
@@ -97,6 +96,9 @@ public sealed class Plugin : IDalamudPlugin
         // Subscribe to login and logout events
         Svc.ClientState.Login += OnLogin;
         Svc.Framework.Update += OnFrameworkUpdate;
+        
+        // Subscribe to configuration changes
+        Configuration.ConfigUpdated += OnConfigurationUpdated;
 
         Svc.Log.Info("Party Finder Reborn initialized successfully!");
     }
@@ -132,11 +134,13 @@ public sealed class Plugin : IDalamudPlugin
         WorldService?.Dispose();
 
         Svc.Commands.RemoveHandler(CommandName);
-        Svc.Commands.RemoveHandler(RefreshCommandName);
-        Svc.Commands.RemoveHandler(DebugCommandName);
+        Svc.Commands.RemoveHandler("/pfr"); // Remove alias
         Svc.Commands.RemoveHandler(ConfigCommandName);
 
         Svc.Framework.Update -= OnFrameworkUpdate;
+        
+        // Unsubscribe from configuration changes
+        Configuration.ConfigUpdated -= OnConfigurationUpdated;
         
         // Cancel all notification workers
         foreach (var (listingId, cts) in _notificationWorkers)
@@ -158,8 +162,16 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnCommand(string command, string args)
     {
-        // Toggle main window on command
-        ToggleMainUI();
+        // Check if this is a config command or if args contain "config"
+        if (command == ConfigCommandName || (!string.IsNullOrWhiteSpace(args) && args.Trim().ToLowerInvariant() == "config"))
+        {
+            ToggleConfigUI();
+        }
+        else
+        {
+            // Toggle main window on command
+            ToggleMainUI();
+        }
     }
     
     private void OnRefreshCommand(string command, string args)
@@ -399,5 +411,38 @@ public sealed class Plugin : IDalamudPlugin
             Svc.Log.Error($"Error getting world ID for {worldName}: {ex.Message}");
             return 0;
         }
+    }
+    
+    private void OnConfigurationUpdated()
+    {
+        Svc.Log.Info("Configuration updated, refreshing authenticated data...");
+        
+        // Refresh all authentication-dependent data in the main window
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await MainWindow.RefreshAllAuthenticatedDataAsync();
+                Svc.Log.Info("Successfully refreshed all authenticated data after configuration update.");
+            }
+            catch (Exception ex)
+            {
+                Svc.Log.Error($"Failed to refresh authenticated data after configuration update: {ex.Message}");
+            }
+        });
+        
+        // Also refresh duty progress data
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await DutyProgressService.RefreshProgressData();
+                Svc.Log.Info("Successfully refreshed duty progress data after configuration update.");
+            }
+            catch (Exception ex)
+            {
+                Svc.Log.Error($"Failed to refresh duty progress data after configuration update: {ex.Message}");
+            }
+        });
     }
 }

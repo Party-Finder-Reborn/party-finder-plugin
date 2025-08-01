@@ -9,6 +9,7 @@ using Dalamud.Interface.Windowing;
 using ECommons.DalamudServices;
 using ImGuiNET;
 using PartyFinderReborn.Models;
+using PartyFinderReborn.Utils;
 
 namespace PartyFinderReborn.Windows
 {
@@ -42,7 +43,7 @@ public override void Draw()
         // Draw loading spinner overlay if any async operation is in progress
         if (IsRefreshing || IsJoining || IsLeaving)
         {
-            DrawLoadingSpinner();
+            LoadingHelper.DrawLoadingSpinner();
         }
     }
 
@@ -335,7 +336,9 @@ if (ImGui.Button(IsJoining ? "Joining..." : "Join Party", new Vector2(100, 0))) 
                     ImGui.SameLine();
                     if (ImGui.Button("Edit", new Vector2(60, 0)))
                     {
-                        Plugin.WindowSystem.AddWindow(new CreateEditListingWindow(Plugin, Listing, false));
+                        var editWindow = new CreateEditListingWindow(Plugin, Listing, false);
+                        Plugin.WindowSystem.AddWindow(editWindow);
+                        editWindow.IsOpen = true;
                         IsOpen = false;
                     }
                 }
@@ -414,7 +417,7 @@ if (ImGui.Button(IsJoining ? "Joining..." : "Join Party", new Vector2(100, 0))) 
                 try
                 {
                     var characterName = Svc.ClientState.LocalPlayer?.Name.TextValue;
-                var worldName = Svc.ClientState.LocalPlayer?.CurrentWorld.Value.Name.ToString();
+                var worldName = Svc.ClientState.LocalPlayer?.CurrentWorld.Value.Name.ExtractText();
 
                     if (characterName == null || worldName == null)
                     {

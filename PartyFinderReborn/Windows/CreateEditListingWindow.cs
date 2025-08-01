@@ -41,7 +41,7 @@ namespace PartyFinderReborn.Windows
         // Duty selection state
         private ContentFinderCondition? _selectedDuty;
         
-        public CreateEditListingWindow(Plugin plugin, PartyListing listing, bool createMode = false) : base(plugin, listing, $"{(createMode ? "Create" : "Edit")} Listing")
+        public CreateEditListingWindow(Plugin plugin, PartyListing listing, bool createMode = false) : base(plugin, listing, $"{(createMode ? "Create" : "Edit")} Listing##edit_{listing.Id}")
         {
             SizeConstraints = new WindowSizeConstraints
             {
@@ -144,7 +144,7 @@ namespace PartyFinderReborn.Windows
             // Server Information
             ImGui.Text("Datacenter *");
             var datacenters = WorldService.GetAllDatacenters();
-            var datacenterNames = datacenters.Select(dc => dc.Name.ToString()).ToArray();
+            var datacenterNames = datacenters.Select(dc => dc.Name.ExtractText()).ToArray();
 
             int currentDatacenterIndex = -1;
             if (!string.IsNullOrEmpty(_editDatacenter))
@@ -161,14 +161,14 @@ namespace PartyFinderReborn.Windows
                 if (currentDatacenterIndex >= 0 && currentDatacenterIndex < datacenters.Length)
                 {
                     var selectedDatacenter = datacenters[currentDatacenterIndex];
-                    var newApiDcName = WorldService.GetApiDatacenterName(selectedDatacenter.Name.ToString());
+                    var newApiDcName = WorldService.GetApiDatacenterName(selectedDatacenter.Name.ExtractText());
 
                     if (_editDatacenter != newApiDcName)
                     {
                         _editDatacenter = newApiDcName;
                         var worldsForNewDc = WorldService.GetWorldsForDatacenter(selectedDatacenter.RowId);
                         var firstWorld = worldsForNewDc.FirstOrDefault();
-                        _editWorld = !firstWorld.Equals(default(World)) ? firstWorld.Name.ToString() : "";
+                        _editWorld = !firstWorld.Equals(default(World)) ? firstWorld.Name.ExtractText() : "";
                     }
                 }
             }
@@ -179,7 +179,7 @@ namespace PartyFinderReborn.Windows
             if (selectedDcInfo.HasValue)
             {
                 var worlds = WorldService.GetWorldsForDatacenter(selectedDcInfo.Value.RowId);
-                var worldNames = worlds.Select(w => w.Name.ToString()).ToArray();
+                var worldNames = worlds.Select(w => w.Name.ExtractText()).ToArray();
 
                 if (worldNames.Length > 0)
                 {

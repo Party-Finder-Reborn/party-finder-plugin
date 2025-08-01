@@ -10,6 +10,7 @@ using ImGuiNET;
 using Lumina.Excel.Sheets;
 using PartyFinderReborn.Models;
 using PartyFinderReborn.Services;
+using PartyFinderReborn.Utils;
 
 namespace PartyFinderReborn.Windows;
 
@@ -110,22 +111,8 @@ public abstract class BaseListingWindow : Window, IDisposable
     {
         if (IsSaving || _isJoining || _isLeaving || _isRefreshing)
         {
-            DrawLoadingSpinner();
+            LoadingHelper.DrawLoadingSpinner();
         }
-    }
-
-    protected void DrawLoadingSpinner()
-    {
-        var center = ImGui.GetIO().DisplaySize / 2;
-        var drawList = ImGui.GetForegroundDrawList();
-        var spinnerColor = ImGui.GetColorU32(ImGuiCol.ButtonHovered);
-        var backgroundColor = ImGui.GetColorU32(ImGuiCol.FrameBg, 0.7f);
-        var radius = 30;
-        var thickness = 5;
-        
-        drawList.AddCircleFilled(center, radius + 5, backgroundColor);
-        drawList.PathArcTo(center, radius, (float)(Math.PI * 0.5f * (Environment.TickCount / 100 % 4)), (float)(Math.PI * 0.5f * (Environment.TickCount / 100 % 4)) + (float)(Math.PI * 1.5f), 32);
-        drawList.PathStroke(spinnerColor, ImDrawFlags.None, thickness);
     }
 
     protected async Task LoadPopularTagsAsync()

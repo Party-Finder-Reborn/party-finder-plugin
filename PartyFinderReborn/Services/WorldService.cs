@@ -96,7 +96,7 @@ public class WorldService : IDisposable
         var datacenters = GetAllDatacenters();
         foreach (var dc in datacenters)
         {
-            if (dc.Name.ToString().Equals(datacenterName, StringComparison.OrdinalIgnoreCase))
+            if (dc.Name.ExtractText().Equals(datacenterName, StringComparison.OrdinalIgnoreCase))
             {
                 return dc;
             }
