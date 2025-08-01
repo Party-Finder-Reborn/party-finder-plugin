@@ -7,9 +7,11 @@ using Dalamud.Interface.Colors;
 using Dalamud.Interface.Components;
 using Dalamud.Interface.Windowing;
 using ECommons.DalamudServices;
+using ECommons.ImGuiMethods;
 using ImGuiNET;
 using PartyFinderReborn.Models;
 using PartyFinderReborn.Utils;
+using static ECommons.ImGuiMethods.ImGuiEx;
 
 namespace PartyFinderReborn.Windows
 {
@@ -244,6 +246,15 @@ public override void Draw()
                 });
             }
             
+            // Dedicated Required Plugins section
+            if (Listing.RequiredPlugins.Any())
+            {
+                CollapsingGroup("Required Plugins", () =>
+                {
+                    DrawRequiredPlugins();
+                });
+            }
+            
             CollapsingGroup("Other Requirements", () =>
             {
                 ImGui.Text($"Loot Rules: {Listing.LootRulesDisplay}");
@@ -254,10 +265,6 @@ public override void Draw()
                 if (Listing.VoiceChatRequired)
                 {
                     ImGui.Text("Voice Chat: Required");
-                }
-                if (Listing.RequiredPlugins.Any())
-                {
-                    ImGui.TextWrapped($"Required Plugins: {string.Join(", ", Listing.RequiredPlugins)}");
                 }
             });
         }
@@ -409,6 +416,32 @@ if (ImGui.Button(IsJoining ? "Joining..." : "Join Party", new Vector2(100, 0))) 
         private void DrawProgressBar(float fraction, string text)
         {
             ImGui.ProgressBar(fraction, new Vector2(-1, 0), text);
+        }
+        
+        private void DrawRequiredPlugins()
+        {
+            ImGui.Text("This party requires the following plugins:");
+            ImGui.Spacing();
+            
+            foreach (var pluginName in Listing.RequiredPlugins)
+            {
+                // Try to find the plugin by friendly name first, then fallback to internal name
+                var installedPlugin = Plugin.PluginService.GetInstalled()
+                    .FirstOrDefault(p => p.Name.Equals(pluginName, StringComparison.OrdinalIgnoreCase) ||
+                                       p.InternalName.Equals(pluginName, StringComparison.OrdinalIgnoreCase));
+                
+                var pluginInfo = installedPlugin != null 
+                    ? new RequiredPluginInfo(installedPlugin.InternalName, installedPlugin.Name)
+                    : new RequiredPluginInfo(pluginName, pluginName); // Fallback when plugin not found
+                
+                // Draw bullet point with plugin name
+                ImGui.Bullet();
+                ImGui.SameLine();
+                ImGui.Text(pluginName);
+                
+                // Draw individual availability indicator for this plugin
+                ImGuiEx.PluginAvailabilityIndicator(new[] { pluginInfo });
+            }
         }
         private void SendInGamePartyJoinRequest()
         {

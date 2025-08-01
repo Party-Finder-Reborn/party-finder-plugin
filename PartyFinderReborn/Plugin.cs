@@ -33,6 +33,7 @@ public sealed class Plugin : IDalamudPlugin
     public ActionNameService ActionNameService { get; init; }
     public ActionTrackingService ActionTrackingService { get; init; }
     public WorldService WorldService { get; init; }
+    public PluginService PluginService { get; init; }
 
     public readonly WindowSystem WindowSystem = new("PartyFinderReborn");
     private ConfigWindow ConfigWindow { get; init; }
@@ -57,6 +58,7 @@ public sealed class Plugin : IDalamudPlugin
         ActionNameService = new ActionNameService();
         ActionTrackingService = new ActionTrackingService(DutyProgressService, ContentFinderService, Configuration);
         WorldService = new WorldService();
+        PluginService = new PluginService();
 
         // Initialize windows
         ConfigWindow = new ConfigWindow(this);
@@ -132,6 +134,7 @@ public sealed class Plugin : IDalamudPlugin
         ApiService?.Dispose();
         ContentFinderService?.Dispose();
         WorldService?.Dispose();
+        PluginService?.Dispose();
 
         Svc.Commands.RemoveHandler(CommandName);
         Svc.Commands.RemoveHandler("/pfr"); // Remove alias

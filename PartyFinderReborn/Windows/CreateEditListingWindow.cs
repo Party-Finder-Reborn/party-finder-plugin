@@ -34,7 +34,6 @@ namespace PartyFinderReborn.Windows
         private string _editPfCode = string.Empty;
         private string _newTag = string.Empty;
         private string _newStrategy = string.Empty;
-        private string _newRequiredPlugin = string.Empty;
         private string _creatorRole = "DPS"; // Default role for creator
         private int _editMaxSize = 8; // Default party size
 
@@ -78,7 +77,6 @@ namespace PartyFinderReborn.Windows
             _editMaxSize = listing.MaxSize > 0 ? listing.MaxSize : 8; // Initialize party size with default 8
             _newTag = string.Empty;
             _newStrategy = string.Empty;
-            _newRequiredPlugin = string.Empty;
             _creatorRole = "DPS"; // Reset to default
 
             _selectedDuty = ContentFinderService.GetContentFinderCondition(_editCfcId);
@@ -263,6 +261,9 @@ namespace PartyFinderReborn.Windows
             ImGui.SliderInt("Min Item Level##minilvl", ref _editMinItemLevel, 0, 999);
             ImGui.SliderInt("Max Item Level##maxilvl", ref _editMaxItemLevel, 0, 999);
             
+            // Required Plugins Modal
+            PluginSelectorModal.Draw();
+
             // Progress Points (Boss Abilities)
             DrawProgressPointsSection();
             
@@ -296,12 +297,9 @@ namespace PartyFinderReborn.Windows
                 }
             }
             
-            ImGui.InputText("Add Required Plugin", ref _newRequiredPlugin, 100);
-            ImGui.SameLine();
-            if (ImGui.Button("Add Plugin") && !string.IsNullOrWhiteSpace(_newRequiredPlugin) && !_editRequiredPlugins.Contains(_newRequiredPlugin))
+            if (ImGui.Button("Add Required Plugin"))
             {
-                _editRequiredPlugins.Add(_newRequiredPlugin.Trim());
-                _newRequiredPlugin = "";
+                PluginSelectorModal.OpenForName(null, OnRequiredPluginSelected);
             }
             
             // Voice Chat Required
@@ -477,6 +475,14 @@ namespace PartyFinderReborn.Windows
             _ = SaveListingAsync();
         }
         
+        private void OnRequiredPluginSelected(string? pluginName)
+        {
+            if (pluginName != null && !_editRequiredPlugins.Contains(pluginName))
+            {
+                _editRequiredPlugins.Add(pluginName);
+            }
+        }
+        
         private async Task SaveListingAsync()
         {
             if (_editCfcId == 0)
@@ -525,6 +531,8 @@ namespace PartyFinderReborn.Windows
                     RequiredClears = new List<uint>(_editRequiredClears),
                     ProgPoint = FormatProgPointsAsString(_editProgPoint),
                     ExperienceLevel = _editExperienceLevel,
+                    // API expects friendly plugin names (not internal names) for proper client-side matching
+                    // This allows joiners to check if they have the required plugins by name
                     RequiredPlugins = new List<string>(_editRequiredPlugins),
                     VoiceChatRequired = _editVoiceChatRequired,
                     JobRequirements = new Dictionary<string, object>(), 

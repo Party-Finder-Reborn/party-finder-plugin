@@ -24,6 +24,7 @@ public abstract class BaseListingWindow : Window, IDisposable
     protected readonly DutyProgressService DutyProgressService;
     protected readonly ActionTrackingService ActionTrackingService;
     protected readonly WorldService WorldService;
+    protected readonly PluginService PluginService;
     
     // === STATE MANAGEMENT ===
     protected PartyListing Listing;
@@ -47,6 +48,7 @@ public abstract class BaseListingWindow : Window, IDisposable
     
     // UI Components
     protected DutySelectorModal DutySelectorModal;
+    protected PluginSelectorModal PluginSelectorModal;
     
     // Data Cache
     protected static List<PopularItem> PopularTags = new();
@@ -75,8 +77,10 @@ public abstract class BaseListingWindow : Window, IDisposable
         DutyProgressService = plugin.DutyProgressService;
         ActionTrackingService = plugin.ActionTrackingService;
         WorldService = plugin.WorldService;
+        PluginService = plugin.PluginService;
         
         DutySelectorModal = new DutySelectorModal(ContentFinderService);
+        PluginSelectorModal = new PluginSelectorModal(PluginService);
         
         // Load popular tags if not already loaded
         if (!_popularTagsLoaded)
