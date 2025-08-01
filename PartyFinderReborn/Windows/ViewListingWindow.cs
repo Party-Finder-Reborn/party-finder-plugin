@@ -60,7 +60,6 @@ public override void Draw()
             {
                 Svc.Chat.Print($"[Party Finder Reborn] {joinResult.Message}");
                 await RefreshListingAsync();
-                IsOpen = false;
             }
             else
             {
@@ -332,31 +331,41 @@ if (ImGui.Button(IsJoining ? "Joining..." : "Join Party", new Vector2(100, 0))) 
                     }
                 }
                 
-// Refresh button
-                ImGui.SameLine(ImGui.GetContentRegionMax().X - 160);
-                ImGui.BeginDisabled(IsRefreshing);
-                if (ImGui.Button(IsRefreshing ? "Refreshing..." : "Refresh", new Vector2(80, 0))) { _ = RefreshListingAsync(); }
-                ImGui.EndDisabled();
+                // Calculate button positioning from right side
+                var contentWidth = ImGui.GetContentRegionMax().X;
+                var closeButtonWidth = 60f;
+                var editButtonWidth = 60f;
+                var refreshButtonWidth = 80f;
+                var buttonSpacing = ImGui.GetStyle().ItemSpacing.X;
                 
-                // Edit button (if owner)
+                // Close button (rightmost)
+                ImGui.SameLine(contentWidth - closeButtonWidth);
+                if (ImGui.Button("Close", new Vector2(closeButtonWidth, 0)))
+                {
+                    IsOpen = false;
+                }
+                
+                // Edit button (if owner, to the left of Close)
                 if (Listing.IsOwner)
                 {
-                    ImGui.SameLine();
-                    if (ImGui.Button("Edit", new Vector2(60, 0)))
+                    ImGui.SameLine(contentWidth - closeButtonWidth - buttonSpacing - editButtonWidth);
+                    if (ImGui.Button("Edit", new Vector2(editButtonWidth, 0)))
                     {
                         var editWindow = new CreateEditListingWindow(Plugin, Listing, false);
                         Plugin.WindowSystem.AddWindow(editWindow);
                         editWindow.IsOpen = true;
-                        IsOpen = false;
                     }
                 }
-
-                // Close button
-                ImGui.SameLine(ImGui.GetContentRegionMax().X - 40);
-                if (ImGui.Button("Close", new Vector2(60, 0)))
-                {
-                    IsOpen = false;
-                }
+                
+                // Refresh button (to the left of Edit/Close)
+                var refreshButtonStart = Listing.IsOwner 
+                    ? contentWidth - closeButtonWidth - buttonSpacing - editButtonWidth - buttonSpacing - refreshButtonWidth
+                    : contentWidth - closeButtonWidth - buttonSpacing - refreshButtonWidth;
+                    
+                ImGui.SameLine(refreshButtonStart);
+                ImGui.BeginDisabled(IsRefreshing);
+                if (ImGui.Button(IsRefreshing ? "Refreshing..." : "Refresh", new Vector2(refreshButtonWidth, 0))) { _ = RefreshListingAsync(); }
+                ImGui.EndDisabled();
             }
             ImGui.EndChild();
         }

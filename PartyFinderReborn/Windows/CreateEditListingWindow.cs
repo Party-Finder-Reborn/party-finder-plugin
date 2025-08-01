@@ -71,8 +71,26 @@ namespace PartyFinderReborn.Windows
             _editVoiceChatRequired = listing.VoiceChatRequired;
             _editLootRules = string.IsNullOrEmpty(listing.LootRules) ? "need_greed" : listing.LootRules;
             _editParseRequirement = string.IsNullOrEmpty(listing.ParseRequirement) ? "none" : listing.ParseRequirement;
-            _editDatacenter = listing.Datacenter;
-            _editWorld = listing.World;
+            
+            // Initialize datacenter and world - prefer current world for new listings
+            if (string.IsNullOrEmpty(listing.Datacenter) || string.IsNullOrEmpty(listing.World))
+            {
+                // For new listings, use current world/datacenter instead of home world
+                var currentDatacenter = WorldService.GetCurrentPlayerCurrentDataCenter();
+                var currentWorld = WorldService.GetCurrentPlayerCurrentWorld();
+                
+                _editDatacenter = !string.IsNullOrEmpty(currentDatacenter) 
+                    ? WorldService.GetApiDatacenterName(currentDatacenter) 
+                    : listing.Datacenter;
+                _editWorld = !string.IsNullOrEmpty(currentWorld) ? currentWorld : listing.World;
+            }
+            else
+            {
+                // For existing listings, keep the original values
+                _editDatacenter = listing.Datacenter;
+                _editWorld = listing.World;
+            }
+            
             _editPfCode = listing.PfCode;
             _editMaxSize = listing.MaxSize > 0 ? listing.MaxSize : 8; // Initialize party size with default 8
             _newTag = string.Empty;
