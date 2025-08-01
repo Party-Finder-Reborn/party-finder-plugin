@@ -43,6 +43,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly Dictionary<string, CancellationTokenSource> _notificationWorkers = new();
     private readonly Dictionary<string, long> _lastNotificationTimestamps = new();
     private readonly Dictionary<uint, Action<uint, SeString>> _chatLinkHandlers = new();
+    private readonly HashSet<string> _notifiedInvitations = new(); // Track which invitations we've already shown to user
 
     public Plugin(IDalamudPluginInterface pluginInterface)
     {
@@ -322,6 +323,15 @@ public sealed class Plugin : IDalamudPlugin
 
     private void SendJoinNotificationToChat(InvitationNotification notification)
     {
+        // Check if we've already notified about this invitation
+        if (_notifiedInvitations.Contains(notification.Id))
+        {
+            return; // Skip - already notified
+        }
+        
+        // Mark this invitation as notified
+        _notifiedInvitations.Add(notification.Id);
+        
         // Generate a unique command ID for this notification
         var commandId = (uint)(_chatLinkHandlers.Count + 1);
         
