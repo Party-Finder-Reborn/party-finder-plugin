@@ -238,11 +238,13 @@ public sealed class Plugin : IDalamudPlugin
         var now = DateTime.Now;
         var elapsed = now - lastFrameworkUpdate;
 
-        if (elapsed.TotalSeconds >= Configuration.RefreshIntervalSeconds)
+        // Auto-refresh every 60 seconds (hardcoded)
+        if (elapsed.TotalSeconds >= 60)
         {
             lastFrameworkUpdate = now;
 
-            if (Configuration.AutoRefreshListings && MainWindow.IsOpen)
+            // Always auto-refresh when main window is open
+            if (MainWindow.IsOpen)
             {
                 _ = MainWindow.LoadPartyListingsAsync();
             }

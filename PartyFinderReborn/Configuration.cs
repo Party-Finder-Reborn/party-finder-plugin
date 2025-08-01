@@ -15,12 +15,9 @@ public class Configuration : IPluginConfiguration
     // UI Configuration
     public bool ShowMainWindow { get; set; } = false;
     public bool AutoOpenOnLogin { get; set; } = false;
-    public float WindowOpacity { get; set; } = 1.0f;
     
     // Plugin Settings
     public bool EnableNotifications { get; set; } = true;
-    public bool AutoRefreshListings { get; set; } = true;
-    public int RefreshIntervalSeconds { get; set; } = 60;
     
     // Server Connection Settings
     public string ApiKey { get; set; } = string.Empty;
@@ -34,7 +31,6 @@ public class Configuration : IPluginConfiguration
     // Action Tracking Filters
     public bool TrackBossActionsOnly { get; set; } = true;
     public bool TrackTrashMobs { get; set; } = false;
-    public int SyncDebounceSeconds { get; set; } = 30;
 
     public void Save()
     {

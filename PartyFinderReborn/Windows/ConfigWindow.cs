@@ -41,13 +41,6 @@ public class ConfigWindow : Window, IDisposable
                 Configuration.AutoOpenOnLogin = autoOpenOnLogin;
                 Configuration.Save();
             }
-
-            var windowOpacity = Configuration.WindowOpacity;
-            if (ImGui.SliderFloat("Window Opacity", ref windowOpacity, 0.0f, 1.0f))
-            {
-                Configuration.WindowOpacity = windowOpacity;
-                Configuration.Save();
-            }
         }
         
         // Plugin Settings
@@ -58,23 +51,6 @@ public class ConfigWindow : Window, IDisposable
             {
                 Configuration.EnableNotifications = enableNotifications;
                 Configuration.Save();
-            }
-            
-            var autoRefreshListings = Configuration.AutoRefreshListings;
-            if (ImGui.Checkbox("Auto Refresh Listings", ref autoRefreshListings))
-            {
-                Configuration.AutoRefreshListings = autoRefreshListings;
-                Configuration.Save();
-            }
-
-            var refreshIntervalSeconds = Configuration.RefreshIntervalSeconds;
-            if (ImGui.InputInt("Refresh Interval (Seconds)", ref refreshIntervalSeconds))
-            {
-                if (refreshIntervalSeconds > 0)
-                {
-                    Configuration.RefreshIntervalSeconds = refreshIntervalSeconds;
-                    Configuration.Save();
-                }
             }
         }
         
@@ -164,23 +140,6 @@ public class ConfigWindow : Window, IDisposable
                 if (ImGui.IsItemHovered())
                 {
                     ImGui.SetTooltip("Track actions from trash mobs (non-boss enemies)");
-                }
-                
-                ImGui.Separator();
-                
-                // Sync Settings
-                ImGui.Text("Synchronization:");
-                
-                var syncDebounceSeconds = Configuration.SyncDebounceSeconds;
-                if (ImGui.SliderInt("Sync Debounce (Seconds)", ref syncDebounceSeconds, 5, 120))
-                {
-                    Configuration.SyncDebounceSeconds = syncDebounceSeconds;
-                    Configuration.Save();
-                }
-                
-                if (ImGui.IsItemHovered())
-                {
-                    ImGui.SetTooltip("Minimum time between progress point syncs to avoid spamming the server");
                 }
                 
                 ImGui.Unindent();
