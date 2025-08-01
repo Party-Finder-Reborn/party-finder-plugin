@@ -35,4 +35,9 @@
     </None>
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Resources/auth.dat" Condition="'$(Configuration)' == 'Release'" />
+    <EmbeddedResource Include="Resources/AuthDataDevEncrypted.dat" Condition="'$(Configuration)' == 'Debug'" LogicalName="PartyFinderReborn.Resources.auth.dat" />
+  </ItemGroup>
+
 </Project>

@@ -22,21 +22,5 @@ public static class Constants
     public const string ApiCoreEndpoint = "/api/core/";
     public const string ProgressBase = "/api/v1/progress";
     
-    // ECDSA Signing Configuration
-    // This method will have its string obfuscated by ConfuserEx
-    public static string GetPrivateKey()
-    {
-#if RELEASE_BUILD
-        return "INJECTED_PRIVATE_KEY";
-#else
-        return @"-----BEGIN PRIVATE KEY-----
-MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgPLmCaPsaIe6DeKDM
-+Wyt4Ja/jmj3Cy1EOqyZF+UyIBahRANCAATIGqD1KTbHLwiCjFjTrhhZpTtp29KH
-0JjNLxA1HFpg1qp0+Wd2PzHHkohREq/jwr5XzArNTzrOfQZ21MXVX/Tf
------END PRIVATE KEY-----";
-#endif
-    }
-    
-    // Cached property for backward compatibility
-    public static string PrivateKey => GetPrivateKey();
+    public static string PrivateKey => Utils.ResourceDecoder.GetDecodedContent();
 }

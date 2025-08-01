@@ -382,3 +382,12 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+
+# Sensitive files - DO NOT COMMIT
+*.pem
+*private_key*
+*_key.pem
+signing_key*
+test_private_key*
+# Production auth resource (encrypted is OK, but be careful)
+auth.dat

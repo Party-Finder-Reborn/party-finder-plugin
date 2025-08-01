@@ -1,4 +1,4 @@
-name: Build &amp; Obfuscate Plugin
+name: Build Plugin
 on:
   push:
     tags:
@@ -37,96 +37,27 @@ jobs:
       - name: Restore Nuget Packages
         run: dotnet restore PartyFinderReborn/PartyFinderReborn.csproj
         
-      - name: Inject private key into Constants.cs
+      - name: Create encrypted resource
         run: |
-          # Create backup of original Constants.cs before injection
-          Copy-Item "PartyFinderReborn\Constants.cs" "PartyFinderReborn\Constants.cs.backup" -Force
+          # Create encrypted resource from private key
+          .\scripts\encrypt-resource.ps1 -PrivateKeyPath "signing_key.pem" -OutputPath "PartyFinderReborn\Resources\auth.dat"
           
-          # Run injection script
-          .\scripts\inject-key.ps1 -PrivateKeyPath "signing_key.pem" -ConstantsFilePath "PartyFinderReborn\Constants.cs"
-          
-          # Verify injection worked but don't expose the key
-          $constantsContent = Get-Content "PartyFinderReborn\Constants.cs" -Raw
-          if ($constantsContent -match "INJECTED_PRIVATE_KEY") {
-            Write-Host "❌ Private key injection failed - placeholder still present"
-            exit 1
-          } elseif ($constantsContent -match "BEGIN PRIVATE KEY") {
-            Write-Host "✅ Private key injection completed successfully"
+          # Verify encrypted resource was created
+          if (Test-Path "PartyFinderReborn\Resources\auth.dat") {
+            $size = (Get-Item "PartyFinderReborn\Resources\auth.dat").Length
+            Write-Host "✅ Encrypted resource created successfully ($size bytes)"
           } else {
-            Write-Host "⚠️  Private key injection status unclear"
+            Write-Host "❌ Failed to create encrypted resource"
+            exit 1
           }
 
-      - name: Build Plugin (Self-Contained)
+      - name: Build Plugin
         run: |
-          # Build with all dependencies included for obfuscation
-          dotnet publish --no-restore -c Release PartyFinderReborn/PartyFinderReborn.csproj -p:AssemblyVersion=${{ env.tag }} -p:FileVersion=${{ env.tag }} -p:PackageVersion=${{ env.tag }} -p:InformationalVersion=${{ env.tag }} -p:DefineConstants="RELEASE_BUILD" --output .\publish --self-contained false
-          
-          # Also build normally for the final output
+          # Build plugin with encrypted resource
           dotnet build --no-restore -c Release PartyFinderReborn/PartyFinderReborn.csproj -p:AssemblyVersion=${{ env.tag }} -p:FileVersion=${{ env.tag }} -p:PackageVersion=${{ env.tag }} -p:InformationalVersion=${{ env.tag }} -p:DefineConstants="RELEASE_BUILD" --output .\build
-
-      - name: Setup ConfuserEx
-        run: |
-          # Download and setup ConfuserEx CLI
-          Invoke-WebRequest -Uri https://github.com/mkaring/ConfuserEx/releases/latest/download/ConfuserEx-CLI.zip -OutFile ConfuserEx-CLI.zip
-          Expand-Archive -Force ConfuserEx-CLI.zip -DestinationPath confuserex
-
-      - name: Prepare Obfuscation Environment
-        run: |
-          # Create directory structure for ConfuserEx
-          New-Item -ItemType Directory -Path ".\PartyFinderReborn\bin\Release" -Force
-          
-          # Copy the main plugin DLL
-          Copy-Item ".\build\PartyFinderReborn.dll" ".\PartyFinderReborn\bin\Release\PartyFinderReborn.dll" -Force
-          
-          # Find .NET installation paths dynamically
-          $dotnetRoot = "C:\Program Files\dotnet"
-          $netCoreAppPath = Get-ChildItem "$dotnetRoot\shared\Microsoft.NETCore.App" | Where-Object { $_.Name -like "9.*" } | Sort-Object Name -Descending | Select-Object -First 1
-          $refPath = Get-ChildItem "$dotnetRoot\packs\Microsoft.NETCore.App.Ref" | Where-Object { $_.Name -like "9.*" } | Sort-Object Name -Descending | Select-Object -First 1
-          
-          Write-Host "Found .NET paths:"
-          Write-Host "  Runtime: $($netCoreAppPath.FullName)"
-          Write-Host "  Reference: $($refPath.FullName)\ref\net9.0"
-          
-          # Copy .NET runtime assemblies
-          if ($netCoreAppPath) {
-            Get-ChildItem "$($netCoreAppPath.FullName)\*.dll" | Where-Object { 
-              $_.Name -match "^(System\.|Microsoft\.|netstandard|mscorlib)"
-            } | Copy-Item -Destination ".\PartyFinderReborn\bin\Release\" -Force -ErrorAction SilentlyContinue
-          }
-          
-          # Copy .NET reference assemblies
-          if ($refPath) {
-            $refAssemblyPath = "$($refPath.FullName)\ref\net9.0"
-            if (Test-Path $refAssemblyPath) {
-              Get-ChildItem "$refAssemblyPath\*.dll" | Where-Object { 
-                $_.Name -match "^(System\.|Microsoft\.|netstandard|mscorlib)"
-              } | Copy-Item -Destination ".\PartyFinderReborn\bin\Release\" -Force -ErrorAction SilentlyContinue
-            }
-          }
-          
-          # Copy NuGet package dependencies from publish output
-          Get-ChildItem ".\publish\*.dll" | Where-Object { 
-            $_.Name -in @("BouncyCastle.Cryptography.dll", "ECommons.dll", "Newtonsoft.Json.dll", "System.Net.Http.Json.dll")
-          } | Copy-Item -Destination ".\PartyFinderReborn\bin\Release\" -Force -ErrorAction SilentlyContinue
-          
-          # Copy Dalamud assemblies
-          $dalamudPath = "$env:AppData\XIVLauncher\addon\Hooks\dev"
-          if (Test-Path "$dalamudPath") {
-            Get-ChildItem "$dalamudPath\*.dll" | Copy-Item -Destination ".\PartyFinderReborn\bin\Release\" -Force -ErrorAction SilentlyContinue
-          }
-          
-          Write-Host "Files available for obfuscation:"
-          Get-ChildItem ".\PartyFinderReborn\bin\Release\*.dll" | ForEach-Object { Write-Host "  - $($_.Name)" }
-
-      - name: Obfuscate Plugin
-        run: |
-          # Run obfuscation
-          .\confuserex\Confuser.CLI.exe -n ConfuserEx_Minimum.crproj
 
       - name: Prepare Release Files
         run: |
-          # Copy obfuscated DLL back to build directory
-          Copy-Item ".\PartyFinderReborn\bin\Release\Confused\PartyFinderReborn.dll" ".\build\PartyFinderReborn.dll" -Force
           # Copy plugin manifest
           Copy-Item ".\PartyFinderReborn\PartyFinderReborn.json" ".\build\PartyFinderReborn.json" -Force
 
@@ -142,28 +73,30 @@ jobs:
       - name: Security Cleanup
         if: always()
         run: |
-          # Remove signing key file
-          Remove-Item -Path signing_key.pem -Force -ErrorAction SilentlyContinue
-          
-          # Restore original Constants.cs from backup to remove injected key
-          if (Test-Path "PartyFinderReborn\Constants.cs.backup") {
-            Copy-Item "PartyFinderReborn\Constants.cs.backup" "PartyFinderReborn\Constants.cs" -Force
-            Write-Host "✅ Restored original Constants.cs from backup"
+          # Remove the unencrypted signing key file (CRITICAL)
+          if (Test-Path "signing_key.pem") {
+            Remove-Item -Path signing_key.pem -Force
+            Write-Host "✅ Removed unencrypted signing key"
           }
           
-          # Clean up any other sensitive files that might contain the key
-          Get-ChildItem -Recurse -Include "*.cs" | Where-Object { 
-            (Get-Content $_.FullName -Raw -ErrorAction SilentlyContinue) -match "BEGIN PRIVATE KEY" 
-          } | ForEach-Object { 
-            Write-Host "⚠️  Found private key in: $($_.FullName)"
-            # Don't actually clean these up as they might be legitimate, just warn
+          # Remove the production encrypted resource to prevent accidental commit
+          if (Test-Path "PartyFinderReborn\Resources\auth.dat") {
+            Remove-Item -Path "PartyFinderReborn\Resources\auth.dat" -Force
+            Write-Host "✅ Removed production encrypted resource"
           }
           
-          # Clean up build artifacts that might contain sensitive data
-          Remove-Item -Path ".\publish" -Recurse -Force -ErrorAction SilentlyContinue
+          # Clean up build artifacts
+          Remove-Item -Path ".\build" -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item -Path ".\PartyFinderReborn\bin" -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item -Path ".\PartyFinderReborn\obj" -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item -Path ".\Confused" -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item -Path ".\confuserex" -Recurse -Force -ErrorAction SilentlyContinue
+          
+          # Verify no sensitive files remain
+          $sensitiveFiles = Get-ChildItem -Recurse -Include "*.pem", "*private*key*" -ErrorAction SilentlyContinue
+          if ($sensitiveFiles) {
+            Write-Host "⚠️  WARNING: Sensitive files still present:"
+            $sensitiveFiles | ForEach-Object { Write-Host "  - $($_.FullName)" }
+          } else {
+            Write-Host "✅ No sensitive files detected"
+          }
           
           Write-Host "🧹 Security cleanup completed"
