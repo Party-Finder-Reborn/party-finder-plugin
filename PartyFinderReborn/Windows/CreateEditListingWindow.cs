@@ -138,7 +138,7 @@ namespace PartyFinderReborn.Windows
             ImGui.SliderInt("##maxSize", ref _editMaxSize, 4, 48);
 
             // Description  
-            ImGui.Text("Description");
+            ImGui.Text("Description *");
             ImGui.InputTextMultiline("##description", ref _editDescription, 1000, new Vector2(-1, 100));
             
             // Server Information
@@ -482,18 +482,28 @@ namespace PartyFinderReborn.Windows
             if (_editCfcId == 0)
             {
                 Svc.Log.Warning("Content Finder ID is required");
+                Svc.Chat.PrintError("[Party Finder Reborn] Please select a duty before creating the listing.");
+                return;
+            }
+            
+            if (string.IsNullOrWhiteSpace(_editDescription))
+            {
+                Svc.Log.Warning("Description is required for party listings");
+                Svc.Chat.PrintError("[Party Finder Reborn] Please add a description to your party listing. This helps other players understand what you're looking for!");
                 return;
             }
             
             if (string.IsNullOrWhiteSpace(_editDatacenter))
             {
                 Svc.Log.Warning("Datacenter is required");
+                Svc.Chat.PrintError("[Party Finder Reborn] Please select a datacenter before creating the listing.");
                 return;
             }
             
             if (string.IsNullOrWhiteSpace(_editWorld))
             {
                 Svc.Log.Warning("World is required");
+                Svc.Chat.PrintError("[Party Finder Reborn] Please select a world before creating the listing.");
                 return;
             }
             

@@ -588,16 +588,15 @@ public class MainWindow : Window, IDisposable
     {
         ImGui.Text($"Party Listings ({FilteredListings.Count} found)");
         
-        if (ImGui.BeginTable("PartiesTable", 6, 
+        if (ImGui.BeginTable("PartiesTable", 5, 
             ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable | 
             ImGuiTableFlags.Sortable | ImGuiTableFlags.ScrollY | ImGuiTableFlags.ScrollX | ImGuiTableFlags.SizingFixedFit))
         {
-            ImGui.TableSetupColumn("Duty Name", ImGuiTableColumnFlags.WidthFixed, 0);
-            ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthFixed, 80);
-            ImGui.TableSetupColumn("Experience", ImGuiTableColumnFlags.WidthFixed, 100);
-            ImGui.TableSetupColumn("Requirements", ImGuiTableColumnFlags.WidthFixed, 200);
+            ImGui.TableSetupColumn("Duty Name", ImGuiTableColumnFlags.WidthFixed, 180);
+            ImGui.TableSetupColumn("Description", ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableSetupColumn("Roster", ImGuiTableColumnFlags.WidthFixed, 60);
             ImGui.TableSetupColumn("Location", ImGuiTableColumnFlags.WidthFixed, 150);
-            ImGui.TableSetupColumn("Tags", ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableSetupColumn("Tags", ImGuiTableColumnFlags.WidthFixed, 200);
             ImGui.TableHeadersRow();
 
             foreach (var listing in FilteredListings)
@@ -614,43 +613,34 @@ public class MainWindow : Window, IDisposable
                     }
                     if (ImGui.IsItemHovered())
                     {
-                        ImGui.SetTooltip($"{listing.Description}\nClick to view details");
+                        ImGui.SetTooltip($"Click to view details");
                     }
                 }
 
-                // Status column
+                // Description column
                 if (ImGui.TableNextColumn())
                 {
-                    var statusColor = listing.Status switch
-                    {
-                        "active" => new Vector4(0.0f, 1.0f, 0.0f, 1.0f), // Green
-                        "full" => new Vector4(1.0f, 1.0f, 0.0f, 1.0f),   // Yellow
-                        "completed" => new Vector4(0.5f, 0.5f, 0.5f, 1.0f), // Gray
-                        _ => new Vector4(1.0f, 1.0f, 1.0f, 1.0f) // White
-                    };
-                    ImGui.TextColored(statusColor, listing.StatusDisplay);
-                }
-
-                // Experience level column
-                if (ImGui.TableNextColumn())
-                {
-                    ImGui.Text(listing.ExperienceLevelDisplay);
-                }
-
-                // Requirements column
-                if (ImGui.TableNextColumn())
-                {
-                    var requirements = listing.RequirementsDisplay;
-                    // Use dynamic text wrapping instead of manual truncation
+                    var description = string.IsNullOrWhiteSpace(listing.Description) ? "No description" : listing.Description;
+                    // Use dynamic text wrapping for description
                     ImGui.PushTextWrapPos(ImGui.GetCursorPos().X + ImGui.GetColumnWidth());
-                    ImGui.TextWrapped(requirements);
+                    ImGui.TextWrapped(description);
                     ImGui.PopTextWrapPos();
                     
-                    // Fallback tooltip for full text
-                    if (ImGui.IsItemHovered() && requirements.Length > 50)
+                    // Tooltip for full text if description is long
+                    if (ImGui.IsItemHovered() && description.Length > 80)
                     {
-                        ImGui.SetTooltip(requirements);
+                        ImGui.SetTooltip(description);
                     }
+                }
+
+                // Roster count column
+                if (ImGui.TableNextColumn())
+                {
+                    var rosterText = $"{listing.CurrentSize}/{listing.MaxSize}";
+                    var rosterColor = listing.CurrentSize >= listing.MaxSize 
+                        ? new Vector4(1.0f, 1.0f, 0.0f, 1.0f)  // Yellow when full
+                        : new Vector4(1.0f, 1.0f, 1.0f, 1.0f); // White when not full
+                    ImGui.TextColored(rosterColor, rosterText);
                 }
 
                 // Location column
@@ -662,14 +652,14 @@ public class MainWindow : Window, IDisposable
                 // Tags column
                 if (ImGui.TableNextColumn())
                 {
-                    var tagsDisplay = listing.TagsDisplay;
+                    var tagsDisplay = string.IsNullOrWhiteSpace(listing.TagsDisplay) ? "No tags" : listing.TagsDisplay;
                     // Use dynamic text wrapping instead of manual truncation
                     ImGui.PushTextWrapPos(ImGui.GetCursorPos().X + ImGui.GetColumnWidth());
                     ImGui.TextWrapped(tagsDisplay);
                     ImGui.PopTextWrapPos();
                     
                     // Fallback tooltip for full text
-                    if (ImGui.IsItemHovered() && tagsDisplay.Length > 60)
+                    if (ImGui.IsItemHovered() && tagsDisplay.Length > 40)
                     {
                         ImGui.SetTooltip(tagsDisplay);
                     }
