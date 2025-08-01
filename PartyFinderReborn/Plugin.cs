@@ -338,7 +338,7 @@ public sealed class Plugin : IDalamudPlugin
         // Create the handler for this specific invite
         Action<uint, SeString> handler = (id, seString) =>
         {
-            InvitePlayerToParty(notification.CharacterName, notification.CharacterWorld);
+            InvitePlayerToParty(notification.CharacterName, notification.CharacterWorld, notification.Id);
             
             // Remove the handler after use
             if (_chatLinkHandlers.ContainsKey(commandId))
@@ -365,7 +365,7 @@ public sealed class Plugin : IDalamudPlugin
         Svc.Chat.Print(message);
     }
 
-    private unsafe void InvitePlayerToParty(string? characterName, string? characterWorld)
+    private unsafe void InvitePlayerToParty(string? characterName, string? characterWorld, string? notificationId)
     {
         if (string.IsNullOrEmpty(characterName) || string.IsNullOrEmpty(characterWorld))
         {
@@ -404,6 +404,30 @@ public sealed class Plugin : IDalamudPlugin
                 if (success)
                 {
                     Svc.Chat.Print($"Party invitation sent to {characterName}@{characterWorld}.");
+                    
+                    // Dismiss the notification from the server after successful invite
+                    if (!string.IsNullOrEmpty(notificationId))
+                    {
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                var dismissed = await ApiService.DismissInvitationAsync(notificationId);
+                                if (dismissed)
+                                {
+                                    Svc.Log.Info($"Successfully dismissed notification {notificationId} from server");
+                                }
+                                else
+                                {
+                                    Svc.Log.Warning($"Failed to dismiss notification {notificationId} from server");
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Svc.Log.Error($"Error dismissing notification {notificationId}: {ex.Message}");
+                            }
+                        });
+                    }
                 }
                 else
                 {
