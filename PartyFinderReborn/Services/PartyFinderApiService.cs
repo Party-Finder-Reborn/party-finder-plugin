@@ -11,7 +11,21 @@ using ECommons.DalamudServices;
 using PartyFinderReborn.Models;
 using PartyFinderReborn.Crypto;
 
-namespace PartyFinderReborn.Services;
+namespace PartyFinderReborn.Services
+{
+    public enum ApiOperationType
+    {
+        Read,
+        Write,
+        QuickAction
+    }
+
+    public static class ApiOperationTypeDefaults
+    {
+        public static readonly TimeSpan Read = TimeSpan.FromSeconds(3);
+        public static readonly TimeSpan Write = TimeSpan.FromSeconds(5);
+        public static readonly TimeSpan QuickAction = TimeSpan.FromSeconds(2);
+    }
 
 /// <summary>
 /// Service for communicating with the Party Finder server API
@@ -20,12 +34,14 @@ public class PartyFinderApiService : IDisposable
 {
     private readonly SignedHttpClient _httpClient;
     private readonly Configuration _configuration;
+    private readonly ApiDebounceService _debounceService;
     private static readonly ConcurrentDictionary<string, object> _cache = new();
     private static readonly TimeSpan _cacheDuration = TimeSpan.FromMinutes(5);
     
-    public PartyFinderApiService(Configuration configuration)
+    public PartyFinderApiService(Configuration configuration, ApiDebounceService debounceService)
     {
         _configuration = configuration;
+        _debounceService = debounceService;
         _httpClient = new SignedHttpClient(configuration);
     }
     
@@ -49,27 +65,30 @@ public class PartyFinderApiService : IDisposable
     /// <summary>
     /// Get current user profile
     /// </summary>
-    public async Task<UserProfile?> GetUserProfileAsync()
+public async Task<UserProfile?> GetUserProfileAsync()
     {
-        try
+        return await _debounceService.RunIfAllowedAsync(ApiOperationType.Read, async () => 
         {
-            var response = await _httpClient.GetAsync($"{Constants.ApiBaseUrl}/api/auth/plugin/profile/");
-            
-            if (response.IsSuccessStatusCode)
+            try
             {
-                var json = await response.Content.ReadAsStringAsync();
-                var userProfile = JsonConvert.DeserializeObject<UserProfile>(json);
-                return userProfile;
+                var response = await _httpClient.GetAsync($"{Constants.ApiBaseUrl}/api/auth/plugin/profile/");
+                
+                if (response.IsSuccessStatusCode)
+                {
+                    var json = await response.Content.ReadAsStringAsync();
+                    var userProfile = JsonConvert.DeserializeObject<UserProfile>(json);
+                    return userProfile;
+                }
+                
+                Svc.Log.Warning($"Failed to get user profile: {response.StatusCode}");
+                return null;
             }
-            
-            Svc.Log.Warning($"Failed to get user profile: {response.StatusCode}");
-            return null;
-        }
-        catch (Exception ex)
-        {
-            Svc.Log.Error($"Error getting user profile: {ex.Message}");
-            return null;
-        }
+            catch (Exception ex)
+            {
+                Svc.Log.Error($"Error getting user profile: {ex.Message}");
+                return null;
+            }
+        });
     }
     
     /// <summary>
@@ -78,72 +97,70 @@ public class PartyFinderApiService : IDisposable
     /// <param name="filters">Optional filters to apply</param>
     /// <param name="pageUrl">Optional specific page URL to fetch</param>
     /// <returns>API response containing listings and pagination info</returns>
-    public async Task<ApiResponse<PartyListing>?> GetListingsAsync(ListingFilters? filters = null, string? pageUrl = null)
+public async Task<ApiResponse<PartyListing>?> GetListingsAsync(ListingFilters? filters = null, string? pageUrl = null)
     {
-        try
+        return await _debounceService.RunIfAllowedAsync(ApiOperationType.Read, async () => 
         {
-            string url;
-            
-            if (!string.IsNullOrEmpty(pageUrl))
+            try
             {
-                // Use the provided page URL directly
-                url = pageUrl;
-            }
-            else
-            {
-                // Build URL from base URL and filters
-                url = $"{Constants.ApiBaseUrl}/api/v1/listings/";
+                string url;
                 
-                if (filters != null)
+                if (!string.IsNullOrEmpty(pageUrl))
                 {
-                    var queryParams = filters.ToQueryParameters();
-                    if (queryParams.Count > 0)
+                    url = pageUrl;
+                }
+                else
+                {
+                    url = $"{Constants.ApiBaseUrl}/api/v1/listings/";
+                    if (filters != null)
                     {
-                        var queryString = string.Join("&", queryParams.Select(kvp => $"{kvp.Key}={Uri.EscapeDataString(kvp.Value)}"));
-                        url += "?" + queryString;
+                        var queryParams = filters.ToQueryParameters();
+                        if (queryParams.Count > 0)
+                        {
+                            var queryString = string.Join("&", queryParams.Select(kvp => $"{kvp.Key}={Uri.EscapeDataString(kvp.Value)}"));
+                            url += "?" + queryString;
+                        }
                     }
                 }
+                
+                var response = await _httpClient.GetAsync(url);
+                
+                if (response.IsSuccessStatusCode)
+                {
+                    var json = await response.Content.ReadAsStringAsync();
+                    
+                    try
+                    {
+                        var apiResponse = JsonConvert.DeserializeObject<ApiResponse<PartyListing>>(json);
+                        if (apiResponse != null && apiResponse.Results != null)
+                            return apiResponse;
+                    }
+                    catch (JsonSerializationException)
+                    {
+                        
+                    }
+                    
+                    try
+                    {
+                        var plainList = JsonConvert.DeserializeObject<List<PartyListing>>(json);
+                        if (plainList != null)
+                            return new ApiResponse<PartyListing> { Results = plainList, Count = plainList.Count };
+                    }
+                    catch (JsonSerializationException)
+                    {
+                        Svc.Log.Error($"Failed to deserialize listings response: {json}");
+                    }
+                }
+                
+                Svc.Log.Warning($"Failed to get listings: {response.StatusCode}");
+                return null;
             }
-            
-            var response = await _httpClient.GetAsync(url);
-            
-            if (response.IsSuccessStatusCode)
+            catch (Exception ex)
             {
-                var json = await response.Content.ReadAsStringAsync();
-                
-                // Try deserializing as ApiResponse first
-                try
-                {
-                    var apiResponse = JsonConvert.DeserializeObject<ApiResponse<PartyListing>>(json);
-                    if (apiResponse != null && apiResponse.Results != null)
-                        return apiResponse;
-                }
-                catch (JsonSerializationException)
-                {
-                    // Fall back to plain array
-                }
-                
-                // Otherwise, try deserializing as a plain list
-                try
-                {
-                    var plainList = JsonConvert.DeserializeObject<List<PartyListing>>(json);
-                    if (plainList != null)
-                        return new ApiResponse<PartyListing> { Results = plainList, Count = plainList.Count };
-                }
-                catch (JsonSerializationException)
-                {
-                    Svc.Log.Error($"Failed to deserialize listings response: {json}");
-                }
+                Svc.Log.Error($"Error getting listings: {ex.Message}");
+                return null;
             }
-            
-            Svc.Log.Warning($"Failed to get listings: {response.StatusCode}");
-            return null;
-        }
-        catch (Exception ex)
-        {
-            Svc.Log.Error($"Error getting listings: {ex.Message}");
-            return null;
-        }
+        });
     }
     
 
@@ -251,65 +268,69 @@ public class PartyFinderApiService : IDisposable
     /// <summary>
     /// Create a new party listing
     /// </summary>
-    public async Task<PartyListing?> CreateListingAsync(PartyListing listing)
+public async Task<PartyListing?> CreateListingAsync(PartyListing listing)
     {
-        try
+        return await _debounceService.RunIfAllowedAsync(ApiOperationType.Write, async () => 
         {
-            var json = JsonConvert.SerializeObject(listing);
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
-            
-            var response = await _httpClient.PostAsync($"{Constants.ApiBaseUrl}/api/v1/listings/", content);
-            
-            if (response.IsSuccessStatusCode)
+            try
             {
-                var responseJson = await response.Content.ReadAsStringAsync();
-                var result = JsonConvert.DeserializeObject<PartyListing>(responseJson);
-                return result;
+                var json = JsonConvert.SerializeObject(listing);
+                var content = new StringContent(json, Encoding.UTF8, "application/json");
+                
+                var response = await _httpClient.PostAsync($"{Constants.ApiBaseUrl}/api/v1/listings/", content);
+                
+                if (response.IsSuccessStatusCode)
+                {
+                    var responseJson = await response.Content.ReadAsStringAsync();
+                    var result = JsonConvert.DeserializeObject<PartyListing>(responseJson);
+                    return result;
+                }
+                
+                var errorContent = await response.Content.ReadAsStringAsync();
+                Svc.Log.Warning($"Failed to create listing: {response.StatusCode}");
+                Svc.Log.Warning($"Error details: {errorContent}");
+                return null;
             }
-            
-            // Log detailed error information
-            var errorContent = await response.Content.ReadAsStringAsync();
-            Svc.Log.Warning($"Failed to create listing: {response.StatusCode}");
-            Svc.Log.Warning($"Error details: {errorContent}");
-            return null;
-        }
-        catch (Exception ex)
-        {
-            Svc.Log.Error($"Error creating listing: {ex.Message}");
-            return null;
-        }
+            catch (Exception ex)
+            {
+                Svc.Log.Error($"Error creating listing: {ex.Message}");
+                return null;
+            }
+        });
     }
     
     /// <summary>
     /// Update an existing party listing
     /// </summary>
-    public async Task<PartyListing?> UpdateListingAsync(string id, PartyListing listing)
+public async Task<PartyListing?> UpdateListingAsync(string id, PartyListing listing)
     {
-        try
+        return await _debounceService.RunIfAllowedAsync(ApiOperationType.Write, async () => 
         {
-            var json = JsonConvert.SerializeObject(listing);
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
-            
-            var response = await _httpClient.PutAsync($"{Constants.ApiBaseUrl}/api/v1/listings/{id}/", content);
-            
-            if (response.IsSuccessStatusCode)
+            try
             {
-                var responseJson = await response.Content.ReadAsStringAsync();
-                var result = JsonConvert.DeserializeObject<PartyListing>(responseJson);
-                return result;
+                var json = JsonConvert.SerializeObject(listing);
+                var content = new StringContent(json, Encoding.UTF8, "application/json");
+                
+                var response = await _httpClient.PutAsync($"{Constants.ApiBaseUrl}/api/v1/listings/{id}/", content);
+                
+                if (response.IsSuccessStatusCode)
+                {
+                    var responseJson = await response.Content.ReadAsStringAsync();
+                    var result = JsonConvert.DeserializeObject<PartyListing>(responseJson);
+                    return result;
+                }
+                
+                var errorContent = await response.Content.ReadAsStringAsync();
+                Svc.Log.Warning($"Failed to update listing {id}: {response.StatusCode}");
+                Svc.Log.Warning($"Error details: {errorContent}");
+                return null;
             }
-            
-            // Log detailed error information
-            var errorContent = await response.Content.ReadAsStringAsync();
-            Svc.Log.Warning($"Failed to update listing {id}: {response.StatusCode}");
-            Svc.Log.Warning($"Error details: {errorContent}");
-            return null;
-        }
-        catch (Exception ex)
-        {
-            Svc.Log.Error($"Error updating listing {id}: {ex.Message}");
-            return null;
-        }
+            catch (Exception ex)
+            {
+                Svc.Log.Error($"Error updating listing {id}: {ex.Message}");
+                return null;
+            }
+        });
     }
     
     /// <summary>
@@ -332,36 +353,39 @@ public class PartyFinderApiService : IDisposable
     /// <summary>
     /// Join a party listing.
     /// </summary>
-    public async Task<JoinResult?> JoinListingAsync(string id)
+public async Task<JoinResult?> JoinListingAsync(string id)
     {
-        try
+        return await _debounceService.RunIfAllowedAsync(ApiOperationType.QuickAction, async () => 
         {
-            var response = await _httpClient.PostAsync($"{Constants.ApiBaseUrl}/api/v1/listings/{id}/join/", null);
-            
-            if (response.IsSuccessStatusCode)
+            try
             {
-                var json = await response.Content.ReadAsStringAsync();
-                var result = JsonConvert.DeserializeObject<JoinResult>(json);
-                return result;
-            }
-            
-            if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
-            {
-                var json = await response.Content.ReadAsStringAsync();
-                var result = JsonConvert.DeserializeObject<JoinResult>(json);
-                if (result != null) {
+                var response = await _httpClient.PostAsync($"{Constants.ApiBaseUrl}/api/v1/listings/{id}/join/", null);
+                
+                if (response.IsSuccessStatusCode)
+                {
+                    var json = await response.Content.ReadAsStringAsync();
+                    var result = JsonConvert.DeserializeObject<JoinResult>(json);
                     return result;
                 }
+                
+                if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
+                {
+                    var json = await response.Content.ReadAsStringAsync();
+                    var result = JsonConvert.DeserializeObject<JoinResult>(json);
+                    if (result != null) {
+                        return result;
+                    }
+                }
+                
+                Svc.Log.Warning($"Failed to join listing {id}: {response.StatusCode}");
+                return new JoinResult { Success = false, Message = $"Failed to join party. Status code: {response.StatusCode}" };
             }
-
-            Svc.Log.Warning($"Failed to join listing {id}: {response.StatusCode}");
-            return new JoinResult { Success = false, Message = $"Failed to join party. Status code: {response.StatusCode}" };
-        }
-        catch (Exception ex)
-        {
-            Svc.Log.Error($"Error joining listing {id}: {ex.Message}");
-            return new JoinResult { Success = false, Message = "An unexpected error occurred." };
-        }
+            catch (Exception ex)
+            {
+                Svc.Log.Error($"Error joining listing {id}: {ex.Message}");
+                return new JoinResult { Success = false, Message = "An unexpected error occurred." };
+            }
+        });
     }
     
     /// <summary>
@@ -425,6 +449,88 @@ public class PartyFinderApiService : IDisposable
         catch (Exception ex)
         {
             Svc.Log.Error($"Error leaving listing {id}: {ex.Message}");
+            return new JoinResult { Success = false, Message = "An unexpected error occurred." };
+        }
+    }
+    
+    /// <summary>
+    /// Kick a participant from a party listing.
+    /// </summary>
+    public async Task<JoinResult?> KickParticipantAsync(string listingId, string userId)
+    {
+        try
+        {
+            var requestData = new { user_id = userId };
+            var json = JsonConvert.SerializeObject(requestData);
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            
+            var response = await _httpClient.PostAsync($"{Constants.ApiBaseUrl}/api/v1/listings/{listingId}/kick/", content);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var responseJson = await response.Content.ReadAsStringAsync();
+                // The kick endpoint returns {"detail": "Kicked.", "listing": {...}}
+                // We'll adapt this to JoinResult format for consistency
+                var kickResponse = JsonConvert.DeserializeObject<dynamic>(responseJson);
+                
+                var result = new JoinResult
+                {
+                    Success = true,
+                    Message = kickResponse?.detail?.ToString() ?? "Participant kicked successfully."
+                };
+                
+                // Extract listing data if available
+                if (kickResponse?.listing != null)
+                {
+                    var listing = kickResponse.listing;
+                    result.CurrentSize = listing.current_size ?? 0;
+                    result.MaxSize = listing.max_size ?? 8;
+                    result.PartyFull = listing.party_full ?? false;
+                    result.PfCode = listing.pf_code?.ToString();
+                }
+                
+                return result;
+            }
+            
+            if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+            {
+                var errorJson = await response.Content.ReadAsStringAsync();
+                var errorResponse = JsonConvert.DeserializeObject<dynamic>(errorJson);
+                return new JoinResult 
+                { 
+                    Success = false, 
+                    Message = errorResponse?.detail?.ToString() ?? "You don't have permission to kick participants from this party." 
+                };
+            }
+            
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                var errorJson = await response.Content.ReadAsStringAsync();
+                var errorResponse = JsonConvert.DeserializeObject<dynamic>(errorJson);
+                return new JoinResult 
+                { 
+                    Success = false, 
+                    Message = errorResponse?.detail?.ToString() ?? "User not found or not in this party." 
+                };
+            }
+            
+            if (response.StatusCode == System.Net.HttpStatusCode.BadRequest)
+            {
+                var errorJson = await response.Content.ReadAsStringAsync();
+                var errorResponse = JsonConvert.DeserializeObject<dynamic>(errorJson);
+                return new JoinResult 
+                { 
+                    Success = false, 
+                    Message = errorResponse?.detail?.ToString() ?? "Invalid request parameters." 
+                };
+            }
+
+            Svc.Log.Warning($"Failed to kick participant from listing {listingId}: {response.StatusCode}");
+            return new JoinResult { Success = false, Message = $"Failed to kick participant. Status code: {response.StatusCode}" };
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Error kicking participant from listing {listingId}: {ex.Message}");
             return new JoinResult { Success = false, Message = "An unexpected error occurred." };
         }
     }
@@ -683,4 +789,5 @@ public class PartyFinderApiService : IDisposable
         }
     }
 
+}
 }

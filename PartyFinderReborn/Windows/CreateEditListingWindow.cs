@@ -9,6 +9,7 @@ using ECommons.DalamudServices;
 using ImGuiNET;
 using Lumina.Excel.Sheets;
 using PartyFinderReborn.Models;
+using PartyFinderReborn.Services;
 
 namespace PartyFinderReborn.Windows
 {
@@ -425,15 +426,32 @@ namespace PartyFinderReborn.Windows
             {
                 ImGui.Button("Saving...");
             }
-            else if (ImGui.Button(IsCreateMode ? "Create Listing" : "Save Changes"))
+            else
             {
-                if (IsCreateMode)
+                var saveDisabled = !Plugin.DebounceService.CanExecute(ApiOperationType.Write, out var saveWait);
+                if (saveDisabled)
                 {
-                    ShowRoleSelectionPopup(OnCreateWithRole);
+                    // Update timer each frame for smooth countdown
+                    saveWait = Plugin.DebounceService.SecondsRemaining(ApiOperationType.Write);
                 }
-                else
+                
+                ImGui.BeginDisabled(saveDisabled);
+                if (ImGui.Button(IsCreateMode ? "Create Listing" : "Save Changes"))
                 {
-                    _ = SaveListingAsync();
+                    if (IsCreateMode)
+                    {
+                        ShowRoleSelectionPopup(OnCreateWithRole);
+                    }
+                    else
+                    {
+                        _ = SaveListingAsync();
+                    }
+                }
+                ImGui.EndDisabled();
+                
+                if (saveDisabled && ImGui.IsItemHovered())
+                {
+                    ImGui.SetTooltip($"Please wait {saveWait:F1}s");
                 }
             }
             

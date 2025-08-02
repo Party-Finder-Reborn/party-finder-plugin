@@ -27,6 +27,7 @@ public sealed class Plugin : IDalamudPlugin
     private const string DebugCommandName = "/pfdebug";
 
     public Configuration Configuration { get; init; }
+    public ApiDebounceService DebounceService { get; init; }
     public PartyFinderApiService ApiService { get; init; }
     public ContentFinderService ContentFinderService { get; init; }
     public DutyProgressService DutyProgressService { get; init; }
@@ -53,7 +54,8 @@ public sealed class Plugin : IDalamudPlugin
         Configuration = pluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
         
         // Initialize services
-        ApiService = new PartyFinderApiService(Configuration);
+        DebounceService = new ApiDebounceService();
+        ApiService = new PartyFinderApiService(Configuration, DebounceService);
         ContentFinderService = new ContentFinderService();
         DutyProgressService = new DutyProgressService(ContentFinderService, ApiService, Configuration);
         ActionNameService = new ActionNameService();

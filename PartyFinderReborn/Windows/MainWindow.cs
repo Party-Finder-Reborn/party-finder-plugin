@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using Dalamud.Interface;
 using Dalamud.Interface.Components;
 using PartyFinderReborn.Utils;
+using PartyFinderReborn.Services;
 
 namespace PartyFinderReborn.Windows;
 
@@ -419,6 +420,14 @@ if (response != null)
         ImGui.Columns(1);
         
         // Action buttons
+        var refreshDisabled = !Plugin.DebounceService.CanExecute(ApiOperationType.Read, out var refreshWait);
+        if (refreshDisabled)
+        {
+            // Update timer each frame for smooth countdown
+            refreshWait = Plugin.DebounceService.SecondsRemaining(ApiOperationType.Read);
+        }
+        
+        ImGui.BeginDisabled(refreshDisabled);
         if (ImGuiComponents.IconButton(FontAwesomeIcon.Sync))
         {
             // Reset pagination state on refresh
@@ -430,17 +439,37 @@ if (response != null)
             _ = LoadPartyListingsAsync();
             _ = LoadPopularTagsAsync(); // Also refresh popular tags
         }
-        if (ImGui.IsItemHovered())
+        ImGui.EndDisabled();
+        
+        if (refreshDisabled && ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip($"Please wait {refreshWait:F1}s");
+        }
+        else if (ImGui.IsItemHovered())
         {
             ImGui.SetTooltip("Refresh Listings");
         }
         
         ImGui.SameLine();
+        var createDisabled = !Plugin.DebounceService.CanExecute(ApiOperationType.Write, out var createWait);
+        if (createDisabled)
+        {
+            // Update timer each frame for smooth countdown
+            createWait = Plugin.DebounceService.SecondsRemaining(ApiOperationType.Write);
+        }
+        
+        ImGui.BeginDisabled(createDisabled);
         if (ImGuiComponents.IconButton(FontAwesomeIcon.Plus))
         {
             OpenCreateListingWindow();
         }
-        if (ImGui.IsItemHovered())
+        ImGui.EndDisabled();
+        
+        if (createDisabled && ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip($"Please wait {createWait:F1}s");
+        }
+        else if (ImGui.IsItemHovered())
         {
             ImGui.SetTooltip("Create Listing");
         }
@@ -459,7 +488,6 @@ if (response != null)
         if (ImGui.InputText("Search", ref search, 100))
         {
             CurrentFilters.Search = string.IsNullOrEmpty(search) ? null : search;
-            ResetPaginationAndRefresh();
         }
         
         // Status filter
@@ -471,7 +499,6 @@ if (response != null)
         if (ImGui.Combo("Status", ref currentStatusIndex, statusItems, statusItems.Length))
         {
             CurrentFilters.Status = currentStatusIndex == 0 ? null : statusItems[currentStatusIndex];
-            ResetPaginationAndRefresh();
         }
         
         // Datacenter filter with safe guards against missing world lists
@@ -514,7 +541,6 @@ if (response != null)
                     CurrentFilters.World = null;
                 }
             }
-            ResetPaginationAndRefresh();
         }
         
         // RP Flag filter
@@ -529,7 +555,6 @@ if (response != null)
                 2 => false,
                 _ => null
             };
-            ResetPaginationAndRefresh();
         }
         
         // My Listings toggle filter
@@ -537,7 +562,6 @@ if (response != null)
         if (ImGui.Checkbox("My Listings Only", ref myListingsEnabled))
         {
             CurrentFilters.IsOwner = myListingsEnabled ? true : null;
-            ResetPaginationAndRefresh();
         }
         if (ImGui.IsItemHovered())
         {
@@ -567,7 +591,6 @@ if (response != null)
         {
             CurrentFilters.Tags.Add(NewFilterTag);
             NewFilterTag = "";
-            ResetPaginationAndRefresh();
         }
 
         // Display current filter tags
@@ -579,13 +602,31 @@ if (response != null)
             if (ImGui.SmallButton($"Remove##filtertag{i}"))
             {
                 CurrentFilters.Tags.RemoveAt(i);
-                ResetPaginationAndRefresh();
             }
         }
         
         ImGui.Separator();
 
-        // Reset filters button
+        // Apply and Reset filters buttons
+        var applyFiltersDisabled = !Plugin.DebounceService.CanExecute(ApiOperationType.Read, out var applyFiltersWait);
+        if (applyFiltersDisabled)
+        {
+            // Update timer each frame for smooth countdown
+            applyFiltersWait = Plugin.DebounceService.SecondsRemaining(ApiOperationType.Read);
+        }
+        
+        ImGui.BeginDisabled(applyFiltersDisabled);
+        if (ImGui.Button("Apply Filters"))
+        {
+            ResetPaginationAndRefresh();
+        }
+        ImGui.EndDisabled();
+        
+        if (applyFiltersDisabled && ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip($"Please wait {applyFiltersWait:F1}s");
+        }
+        ImGui.SameLine();
         if (ImGui.Button("Reset Filters"))
         {
             CurrentFilters.Reset();

@@ -11,6 +11,7 @@ using ECommons.DalamudServices;
 using ECommons.ImGuiMethods;
 using ImGuiNET;
 using PartyFinderReborn.Models;
+using PartyFinderReborn.Services;
 using PartyFinderReborn.Utils;
 using static ECommons.ImGuiMethods.ImGuiEx;
 
@@ -74,7 +75,34 @@ public override void Draw()
         {
             _isJoining = false;
         }
-    }
+        }
+
+        /// <summary>
+        /// Kick a participant from the party
+        /// </summary>
+        private async Task KickParticipantAsync(string participantName)
+        {
+            try
+            {
+                // For now, we'll use the participant name as the user identifier
+                // This is a temporary solution until we update the server to provide user IDs
+                var kickResult = await Plugin.ApiService.KickParticipantAsync(Listing.Id, participantName);
+                
+                if (kickResult != null && kickResult.Success)
+                {
+                    Svc.Chat.Print($"[Party Finder Reborn] {kickResult.Message}");
+                    await RefreshListingAsync();
+                }
+                else
+                {
+                    Svc.Chat.PrintError($"[Party Finder Reborn] Failed to kick participant: {kickResult?.Message ?? "Unknown error"}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Svc.Chat.PrintError($"[Party Finder Reborn] Error kicking participant: {ex.Message}");
+            }
+        }
 
         private void DrawListingCard()
         {
@@ -176,6 +204,21 @@ public override void Draw()
                         ImGui.Text(participant.Role);
 
                         ImGui.TableNextColumn();
+                        
+                        // Wrap the name cell with context menu (only if this user is the owner)
+                        if (Listing.IsOwner && ImGui.BeginPopupContextItem($"participant_context_{i}"))
+                        {
+                            // Only show kick option for other players (not the creator themselves)
+                            if (!isLocalPlayer)
+                            {
+                                if (ImGui.MenuItem("Kick from Party"))
+                                {
+                                    _ = KickParticipantAsync(participant.Name);
+                                }
+                            }
+                            ImGui.EndPopup();
+                        }
+                        
                         if (isLocalPlayer)
                         {
                             ImGui.PushStyleColor(ImGuiCol.Text, Yellow);
@@ -309,9 +352,22 @@ public override void Draw()
                     }
                     else if (Listing.HasJoined)
                     {
-                        ImGui.BeginDisabled(IsLeaving);
+                        double leaveWait = 0;
+                        var leaveDisabled = IsLeaving || !Plugin.DebounceService.CanExecute(ApiOperationType.QuickAction, out leaveWait);
+                        if (leaveDisabled && !IsLeaving)
+                        {
+                            // Update timer each frame for smooth countdown
+                            leaveWait = Plugin.DebounceService.SecondsRemaining(ApiOperationType.QuickAction);
+                        }
+                        
+                        ImGui.BeginDisabled(leaveDisabled);
                         if (ImGui.Button(IsLeaving ? "Leaving..." : "Leave Party", new Vector2(100, 0))) { _ = LeavePartyAsync(); }
                         ImGui.EndDisabled();
+                        
+                        if (leaveDisabled && !IsLeaving && ImGui.IsItemHovered())
+                        {
+                            ImGui.SetTooltip($"Please wait {leaveWait:F1}s");
+                        }
                         
                         // Add Join In-Game Party button when user has joined the service party
                         ImGui.SameLine();
@@ -319,9 +375,22 @@ public override void Draw()
                     }
                     else if (Listing.CurrentSize < Listing.MaxSize)
                     {
-                        ImGui.BeginDisabled(IsJoining);
-if (ImGui.Button(IsJoining ? "Joining..." : "Join Party", new Vector2(100, 0))) { ShowRoleSelectionPopup(JoinPartyWithRole); }
+                        double joinWait = 0;
+                        var joinDisabled = IsJoining || !Plugin.DebounceService.CanExecute(ApiOperationType.QuickAction, out joinWait);
+                        if (joinDisabled && !IsJoining)
+                        {
+                            // Update timer each frame for smooth countdown
+                            joinWait = Plugin.DebounceService.SecondsRemaining(ApiOperationType.QuickAction);
+                        }
+                        
+                        ImGui.BeginDisabled(joinDisabled);
+                        if (ImGui.Button(IsJoining ? "Joining..." : "Join Party", new Vector2(100, 0))) { ShowRoleSelectionPopup(JoinPartyWithRole); }
                         ImGui.EndDisabled();
+                        
+                        if (joinDisabled && !IsJoining && ImGui.IsItemHovered())
+                        {
+                            ImGui.SetTooltip($"Please wait {joinWait:F1}s");
+                        }
                     }
                     else
                     {
@@ -363,9 +432,22 @@ if (ImGui.Button(IsJoining ? "Joining..." : "Join Party", new Vector2(100, 0))) 
                     : contentWidth - closeButtonWidth - buttonSpacing - refreshButtonWidth;
                     
                 ImGui.SameLine(refreshButtonStart);
-                ImGui.BeginDisabled(IsRefreshing);
+                double refreshWait = 0;
+                var refreshDisabled = IsRefreshing || !Plugin.DebounceService.CanExecute(ApiOperationType.Read, out refreshWait);
+                if (refreshDisabled && !IsRefreshing)
+                {
+                    // Update timer each frame for smooth countdown
+                    refreshWait = Plugin.DebounceService.SecondsRemaining(ApiOperationType.Read);
+                }
+                
+                ImGui.BeginDisabled(refreshDisabled);
                 if (ImGui.Button(IsRefreshing ? "Refreshing..." : "Refresh", new Vector2(refreshButtonWidth, 0))) { _ = RefreshListingAsync(); }
                 ImGui.EndDisabled();
+                
+                if (refreshDisabled && !IsRefreshing && ImGui.IsItemHovered())
+                {
+                    ImGui.SetTooltip($"Please wait {refreshWait:F1}s");
+                }
             }
             ImGui.EndChild();
         }
