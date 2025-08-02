@@ -45,8 +45,8 @@ public override void Draw()
         DrawListingCard();
         DrawActionButtonsFooter();
 
-        // Draw role selection popup from base class
-        DrawRoleSelectionPopup();
+        // Draw job selection popup from base class
+        DrawJobSelectionPopup();
         
         // Draw failed requirements popup
         DrawFailedRequirementsPopup();
@@ -58,12 +58,12 @@ public override void Draw()
         }
     }
 
-    private async void JoinPartyWithRole(string role)
+    private async void JoinPartyWithJob(string job)
     {
         _isJoining = true;
         try
         {
-            var joinResult = await Plugin.ApiService.JoinListingWithRoleAsync(Listing.Id, role);
+            var joinResult = await Plugin.ApiService.JoinListingWithJobAsync(Listing.Id, job);
             if (joinResult != null && joinResult.Success)
             {
                 Svc.Chat.Print($"[Party Finder Reborn] {joinResult.Message}");
@@ -130,7 +130,10 @@ public override void Draw()
                 ImGui.Text(dutyName);
                 ImGui.PopStyleVar();
                 
-                ImGui.TextColored(ImGuiColors.DalamudGrey, $"Created by {Listing.CreatorDisplay} in {Listing.LocationDisplay}");
+                var creatorText = !string.IsNullOrEmpty(Listing.CreatorJob) 
+                    ? $"Created by {Listing.CreatorDisplay} ({Listing.CreatorJob}) in {Listing.LocationDisplay}"
+                    : $"Created by {Listing.CreatorDisplay} in {Listing.LocationDisplay}";
+                ImGui.TextColored(ImGuiColors.DalamudGrey, creatorText);
             }
             ImGui.EndGroup();
             ImGui.PopStyleVar();
@@ -194,14 +197,13 @@ public override void Draw()
         {
             var localPlayerName = Svc.ClientState.LocalPlayer?.Name.TextValue ?? string.Empty;
 
-            if (ImGui.BeginTable("rosterTable", 3, ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerV))
+            if (ImGui.BeginTable("rosterTable", 4, ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerV))
             {
-                ImGui.TableSetupColumn("Job", ImGuiTableColumnFlags.WidthFixed, 30);
+                ImGui.TableSetupColumn("Job", ImGuiTableColumnFlags.WidthFixed, 80);
                 ImGui.TableSetupColumn("Name", ImGuiTableColumnFlags.WidthStretch);
                 ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthFixed, 60);
+                ImGui.TableSetupColumn("Action", ImGuiTableColumnFlags.WidthFixed, 80);
                 ImGui.TableHeadersRow();
-
-                var jobRoles = new[] { "Tank", "Healer", "DPS" };
                 
                 for (var i = 0; i < Listing.MaxSize; i++)
                 {
@@ -212,9 +214,13 @@ public override void Draw()
                     {
                         var participant = Listing.Participants[i];
                         var isLocalPlayer = !string.IsNullOrEmpty(localPlayerName) && participant.Name.Equals(localPlayerName, StringComparison.OrdinalIgnoreCase);
+                        
+                        // Check if this participant has a pending invitation
+                        var pendingInvitation = Listing.IsOwner ? Plugin.GetPendingInvitationForParticipant(Listing.Id, participant.Name) : null;
+                        var hasPendingInvite = pendingInvitation != null;
 
-                        // Display participant role
-                        ImGui.Text(participant.Role);
+                        // Display participant job name (improved from generic role)
+                        ImGui.Text(!string.IsNullOrEmpty(participant.Job) ? participant.Job : "Any Job");
 
                         ImGui.TableNextColumn();
                         
@@ -232,7 +238,20 @@ public override void Draw()
                             ImGui.EndPopup();
                         }
                         
-                        if (isLocalPlayer)
+                        // Display participant name with special effects for pending invites
+                        if (hasPendingInvite)
+                        {
+                            // Rainbow effect for participants with pending invitations
+                            var time = (float)ImGui.GetTime();
+                            var hue = (time * 0.5f) % 1.0f; // Cycle through hues
+                            ImGui.ColorConvertHSVtoRGB(hue, 0.8f, 1.0f, out var r, out var g, out var b);
+                            var rainbowVec4 = new Vector4(r, g, b, 1.0f);
+                            
+                            ImGui.PushStyleColor(ImGuiCol.Text, rainbowVec4);
+                            ImGui.Text(participant.Name);
+                            ImGui.PopStyleColor();
+                        }
+                        else if (isLocalPlayer)
                         {
                             ImGui.PushStyleColor(ImGuiCol.Text, Yellow);
                             ImGui.Text(participant.Name);
@@ -247,14 +266,33 @@ public override void Draw()
                         
                         ImGui.TableNextColumn();
                         ImGui.TextColored(Green, "Filled");
+                        
+                        ImGui.TableNextColumn();
+                        // Show invite button for participants with pending invitations
+                        if (hasPendingInvite && Listing.IsOwner && pendingInvitation != null)
+                        {
+                            if (ImGui.Button($"Invite##{i}", new Vector2(70, 0)))
+                            {
+                                // Use public wrapper method to invite player
+                                Plugin.InvitePlayerToPartyFromUI(pendingInvitation.CharacterName, pendingInvitation.CharacterWorld, pendingInvitation.Id);
+                            }
+                        }
+                        else
+                        {
+                            // Empty space for alignment
+                            ImGui.Text("");
+                        }
                     }
                     else
                     {
-                        ImGui.Text("-"); // Job icon
+                        // Improved display for open slots - show "Any Job" instead of generic "-"
+                        ImGui.TextDisabled("Any Job");
                         ImGui.TableNextColumn();
                         ImGui.TextDisabled("Open Slot");
                         ImGui.TableNextColumn();
                         ImGui.TextDisabled("Open");
+                        ImGui.TableNextColumn();
+                        ImGui.Text(""); // Empty action column
                     }
                 }
                 ImGui.EndTable();
@@ -397,7 +435,7 @@ public override void Draw()
                         }
                         
                         ImGui.BeginDisabled(joinDisabled);
-                        if (ImGui.Button(IsJoining ? "Joining..." : "Join Party", new Vector2(100, 0))) { ShowRoleSelectionPopup(JoinPartyWithRole); }
+                        if (ImGui.Button(IsJoining ? "Joining..." : "Join Party", new Vector2(100, 0))) { ShowJobSelectionPopup(JoinPartyWithJob); }
                         ImGui.EndDisabled();
                         
                         if (joinDisabled && !IsJoining && ImGui.IsItemHovered())
@@ -469,18 +507,35 @@ public override void Draw()
             var userDatacenter = Plugin.WorldService.GetCurrentPlayerHomeDataCenter();
             var creatorDatacenter = Listing.Datacenter;
             var inSameDatacenter = string.Equals(userDatacenter, creatorDatacenter, StringComparison.OrdinalIgnoreCase);
+            
+            // Check if player is already in a party
+            var isInParty = false;
+            Svc.Framework.RunOnFrameworkThread(() =>
+            {
+                isInParty = Svc.Party.Length > 1; // More than 1 means player + others
+            });
+            
+            var isDisabled = !inSameDatacenter || isInParty;
+            
+            // Show explanatory text when button is disabled
+            if (isDisabled)
+            {
+                if (!inSameDatacenter)
+                {
+                    ImGui.TextColored(ImGuiColors.DalamudRed, "Must be in same datacenter");
+                }
+                else if (isInParty)
+                {
+                    ImGui.TextColored(ImGuiColors.DalamudRed, "Already in a party");
+                }
+            }
 
-            ImGui.BeginDisabled(!inSameDatacenter);
-            if (ImGui.Button("Join In-Game Party", new Vector2(150, 0)) && inSameDatacenter)
+            ImGui.BeginDisabled(isDisabled);
+            if (ImGui.Button("Join In-Game Party", new Vector2(150, 0)) && !isDisabled)
             {
                 SendInGamePartyJoinRequest();
             }
             ImGui.EndDisabled();
-
-            if (!inSameDatacenter && ImGui.IsItemHovered())
-            {
-                ImGui.SetTooltip("You must be in the same datacenter as the party creator to join the in-game party.");
-            }
         }
         
         // Helper to draw a styled section

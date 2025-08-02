@@ -60,10 +60,20 @@ public abstract class BaseListingWindow : Window, IDisposable
     protected static readonly Vector4 Red = new(1.0f, 0.0f, 0.0f, 1.0f);
     protected static readonly Vector4 Orange = new(1.0f, 0.5f, 0.0f, 1.0f);
     
-    // Role selection popup state
-    protected bool _showRoleSelectionPopup = false;
-    protected string _selectedRole = string.Empty;
-    protected Action<string>? _roleSelectionCallback;
+    // Job selection popup state
+    protected bool _showJobSelectionPopup = false;
+    protected string _selectedJob = string.Empty;
+    protected Action<string>? _jobSelectionCallback;
+    
+    // Job categories with their respective jobs
+    protected static readonly Dictionary<string, List<string>> JobCategories = new()
+    {
+        ["Tank"] = new() { "Paladin", "Warrior", "Dark Knight", "Gunbreaker" },
+        ["Healer"] = new() { "White Mage", "Scholar", "Astrologian", "Sage" },
+        ["Melee DPS"] = new() { "Monk", "Dragoon", "Ninja", "Samurai", "Reaper", "Viper" },
+        ["Physical Ranged DPS"] = new() { "Bard", "Machinist", "Dancer" },
+        ["Magical Ranged DPS"] = new() { "Black Mage", "Summoner", "Red Mage", "Pictomancer", "Blue Mage" }
+    };
 
     protected BaseListingWindow(Plugin plugin, PartyListing listing, string name) : base(name)
     {
@@ -249,30 +259,31 @@ public abstract class BaseListingWindow : Window, IDisposable
     {
         if (ImGui.BeginTable("roster_table", 2, ImGuiTableFlags.Borders | ImGuiTableFlags.SizingFixedFit))
         {
-            ImGui.TableSetupColumn("Role");
+            ImGui.TableSetupColumn("Job");
             ImGui.TableSetupColumn("Player");
             ImGui.TableHeadersRow();
 
-            // Example roster data - replace with actual participant data when available
-            var roster = new Dictionary<string, string>
-            {
-                { "Tank", "Filled" },
-                { "Tank", "Open" },
-                { "Healer", "Filled" },
-                { "Healer", "Open" },
-                { "DPS", "Filled" },
-                { "DPS", "Filled" },
-                { "DPS", "Open" },
-                { "DPS", "Open" }
-            };
-
-            foreach (var (role, playerName) in roster)
+            // Show actual participant data using Job property
+            for (var i = 0; i < listing.MaxSize; i++)
             {
                 ImGui.TableNextRow();
                 ImGui.TableNextColumn();
-                ImGui.Text(role);
-                ImGui.TableNextColumn();
-                ImGui.Text(playerName);
+                
+                if (i < listing.Participants.Count)
+                {
+                    var participant = listing.Participants[i];
+                    // Display actual job name instead of generic role
+                    ImGui.Text(!string.IsNullOrEmpty(participant.Job) ? participant.Job : "Any Job");
+                    ImGui.TableNextColumn();
+                    ImGui.Text(participant.Name);
+                }
+                else
+                {
+                    // Show "Any Job" for open slots instead of generic role categories
+                    ImGui.TextDisabled("Any Job");
+                    ImGui.TableNextColumn();
+                    ImGui.TextDisabled("Open Slot");
+                }
             }
 
             ImGui.EndTable();
@@ -569,46 +580,54 @@ public abstract class BaseListingWindow : Window, IDisposable
     }
     
     /// <summary>
-    /// Show role selection popup with a callback for when role is selected
+    /// Show job selection popup with a callback for when job is selected
     /// </summary>
-    protected void ShowRoleSelectionPopup(Action<string> onRoleSelected)
+    protected void ShowJobSelectionPopup(Action<string> onJobSelected)
     {
-        _roleSelectionCallback = onRoleSelected;
-        _selectedRole = string.Empty;
-        _showRoleSelectionPopup = true;
+        _jobSelectionCallback = onJobSelected;
+        _selectedJob = string.Empty;
+        _showJobSelectionPopup = true;
     }
     
     /// <summary>
-    /// Draw the role selection popup - should be called in Draw() method
+    /// Draw the job selection popup - should be called in Draw() method
     /// </summary>
-    protected void DrawRoleSelectionPopup()
+    protected void DrawJobSelectionPopup()
     {
-        if (!_showRoleSelectionPopup) return;
+        if (!_showJobSelectionPopup) return;
         
-        ImGui.OpenPopup("Select Role");
-        if (ImGui.BeginPopupModal("Select Role", ref _showRoleSelectionPopup, ImGuiWindowFlags.AlwaysAutoResize))
+        ImGui.OpenPopup("Select Job");
+        if (ImGui.BeginPopupModal("Select Job", ref _showJobSelectionPopup, ImGuiWindowFlags.AlwaysAutoResize))
         {
-            ImGui.Text("Please select your role:");
+            ImGui.Text("Please select your job:");
             ImGui.Separator();
 
-            if (ImGui.RadioButton("Tank", _selectedRole == "Tank"))
-                _selectedRole = "Tank";
-            ImGui.SameLine();
-            if (ImGui.RadioButton("Healer", _selectedRole == "Healer"))
-                _selectedRole = "Healer";
-            ImGui.SameLine();
-            if (ImGui.RadioButton("DPS", _selectedRole == "DPS"))
-                _selectedRole = "DPS";
-
-            if (ImGui.Button("Confirm") && !string.IsNullOrEmpty(_selectedRole))
+            // Create collapsible headers for each category
+            foreach (var category in JobCategories)
             {
-                _roleSelectionCallback?.Invoke(_selectedRole);
-                _showRoleSelectionPopup = false;
+                if (ImGui.CollapsingHeader(category.Key))
+                {
+                    ImGui.Indent();
+                    foreach (var job in category.Value)
+                    {
+                        if (ImGui.RadioButton(job, _selectedJob == job))
+                            _selectedJob = job;
+                    }
+                    ImGui.Unindent();
+                }
+            }
+
+            ImGui.Separator();
+            
+            if (ImGui.Button("Confirm") && !string.IsNullOrEmpty(_selectedJob))
+            {
+                _jobSelectionCallback?.Invoke(_selectedJob);
+                _showJobSelectionPopup = false;
             }
             ImGui.SameLine();
             if (ImGui.Button("Cancel"))
             {
-                _showRoleSelectionPopup = false;
+                _showJobSelectionPopup = false;
             }
 
             ImGui.EndPopup();

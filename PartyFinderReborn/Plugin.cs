@@ -16,6 +16,7 @@ using FFXIVClientStructs.FFXIV.Client.UI.Info;
 using PartyFinderReborn.Models;
 using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Game.Text.SeStringHandling.Payloads;
+using ECommons.ImGuiMethods;
 
 namespace PartyFinderReborn;
 
@@ -46,6 +47,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly Dictionary<string, long> _lastNotificationTimestamps = new();
     private readonly Dictionary<uint, Action<uint, SeString>> _chatLinkHandlers = new();
     private readonly HashSet<string> _notifiedInvitations = new(); // Track which invitations we've already shown to user
+    private readonly Dictionary<string, List<InvitationNotification>> _pendingInvitationsByListing = new(); // Track pending invitations by listing ID
 
     public Plugin(IDalamudPluginInterface pluginInterface)
     {
@@ -268,10 +270,10 @@ public sealed class Plugin : IDalamudPlugin
         {
             lastFrameworkUpdate = now;
 
-            // Always auto-refresh when main window is open
+            // Always auto-refresh when main window is open - use background method to bypass debouncing
             if (MainWindow.IsOpen)
             {
-                _ = MainWindow.LoadPartyListingsAsync();
+                _ = MainWindow.LoadPartyListingsAsync_Background();
             }
         }
         
@@ -299,7 +301,8 @@ public sealed class Plugin : IDalamudPlugin
             }
             
             // Just fetch the user profile - this is lightweight and maintains our presence in the online count
-            await ApiService.GetUserProfileAsync();
+            // Use the no-debounce version for background operations
+            await ApiService.GetUserProfileAsync_NoDebounce();
         }
         catch
         {
@@ -331,6 +334,9 @@ public sealed class Plugin : IDalamudPlugin
 
                     if (notifications?.Notifications != null && notifications.Notifications.Any())
                     {
+                        // Update pending invitations for this listing
+                        _pendingInvitationsByListing[listingId] = notifications.Notifications.ToList();
+                        
                         foreach (var notification in notifications.Notifications)
                         {
                             // Store last notification timestamp
@@ -339,6 +345,14 @@ public sealed class Plugin : IDalamudPlugin
 
                             // Send notification to chat
                             SendJoinNotificationToChat(notification);
+                        }
+                    }
+                    else
+                    {
+                        // Clear pending invitations if no notifications
+                        if (_pendingInvitationsByListing.ContainsKey(listingId))
+                        {
+                            _pendingInvitationsByListing[listingId].Clear();
                         }
                     }
 
@@ -415,6 +429,16 @@ public sealed class Plugin : IDalamudPlugin
 
         // Send to chat
         Svc.Chat.Print(message);
+        
+        // Show toast notification
+        try
+        {
+            Notify.Info($"{notification.CharacterDisplay} wants to join your party!");
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Warning($"Failed to show toast notification: {ex.Message}");
+        }
     }
     
     /// <summary>
@@ -460,6 +484,13 @@ public sealed class Plugin : IDalamudPlugin
         {
             try
             {
+                // Check if player is busy before sending invite
+                if (ECommons.GameHelpers.Player.IsBusy)
+                {
+                    Svc.Chat.PrintError($"You are currently busy and cannot send a party invitation to {characterName}@{characterWorld}. Please finish what you're doing and try again.");
+                    return;
+                }
+
                 var infoModule = InfoModule.Instance();
                 if (infoModule == null)
                 {
@@ -542,6 +573,36 @@ public sealed class Plugin : IDalamudPlugin
                 Svc.Log.Error($"Error dismissing notification {notificationId}: {ex.Message}");
             }
         });
+    }
+    
+    /// <summary>
+    /// Get pending invitations for a specific listing
+    /// </summary>
+    public List<InvitationNotification> GetPendingInvitations(string listingId)
+    {
+        if (_pendingInvitationsByListing.TryGetValue(listingId, out var invitations))
+        {
+            return invitations.Where(inv => !inv.Expired.GetValueOrDefault()).ToList();
+        }
+        return new List<InvitationNotification>();
+    }
+    
+    /// <summary>
+    /// Get pending invitation by participant Discord name
+    /// </summary>
+    public InvitationNotification? GetPendingInvitationForParticipant(string listingId, string participantName)
+    {
+        var pendingInvitations = GetPendingInvitations(listingId);
+        return pendingInvitations.FirstOrDefault(inv => 
+            inv.Requester.DisplayName.Equals(participantName, StringComparison.OrdinalIgnoreCase));
+    }
+    
+    /// <summary>
+    /// Public wrapper to invite a player to party from UI
+    /// </summary>
+    public void InvitePlayerToPartyFromUI(string? characterName, string? characterWorld, string? notificationId)
+    {
+        InvitePlayerToParty(characterName, characterWorld, notificationId);
     }
     
     private void OnConfigurationUpdated()

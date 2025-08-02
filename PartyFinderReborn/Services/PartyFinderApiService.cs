@@ -69,26 +69,42 @@ public async Task<UserProfile?> GetUserProfileAsync()
     {
         return await _debounceService.RunIfAllowedAsync(ApiOperationType.Read, async () => 
         {
-            try
-            {
-                var response = await _httpClient.GetAsync($"{Constants.ApiBaseUrl}/api/auth/plugin/profile/");
-                
-                if (response.IsSuccessStatusCode)
-                {
-                    var json = await response.Content.ReadAsStringAsync();
-                    var userProfile = JsonConvert.DeserializeObject<UserProfile>(json);
-                    return userProfile;
-                }
-                
-                Svc.Log.Warning($"Failed to get user profile: {response.StatusCode}");
-                return null;
-            }
-            catch (Exception ex)
-            {
-                Svc.Log.Error($"Error getting user profile: {ex.Message}");
-                return null;
-            }
+            return await GetUserProfileInternalAsync();
         });
+    }
+    
+    /// <summary>
+    /// Get current user profile without debouncing (for background operations)
+    /// </summary>
+    public async Task<UserProfile?> GetUserProfileAsync_NoDebounce()
+    {
+        return await GetUserProfileInternalAsync();
+    }
+    
+    /// <summary>
+    /// Internal method for getting user profile
+    /// </summary>
+    private async Task<UserProfile?> GetUserProfileInternalAsync()
+    {
+        try
+        {
+            var response = await _httpClient.GetAsync($"{Constants.ApiBaseUrl}/api/auth/plugin/profile/");
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadAsStringAsync();
+                var userProfile = JsonConvert.DeserializeObject<UserProfile>(json);
+                return userProfile;
+            }
+            
+            Svc.Log.Warning($"Failed to get user profile: {response.StatusCode}");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Error getting user profile: {ex.Message}");
+            return null;
+        }
     }
     
     /// <summary>
@@ -101,66 +117,85 @@ public async Task<ApiResponse<PartyListing>?> GetListingsAsync(ListingFilters? f
     {
         return await _debounceService.RunIfAllowedAsync(ApiOperationType.Read, async () => 
         {
-            try
-            {
-                string url;
-                
-                if (!string.IsNullOrEmpty(pageUrl))
-                {
-                    url = pageUrl;
-                }
-                else
-                {
-                    url = $"{Constants.ApiBaseUrl}/api/v1/listings/";
-                    if (filters != null)
-                    {
-                        var queryParams = filters.ToQueryParameters();
-                        if (queryParams.Count > 0)
-                        {
-                            var queryString = string.Join("&", queryParams.Select(kvp => $"{kvp.Key}={Uri.EscapeDataString(kvp.Value)}"));
-                            url += "?" + queryString;
-                        }
-                    }
-                }
-                
-                var response = await _httpClient.GetAsync(url);
-                
-                if (response.IsSuccessStatusCode)
-                {
-                    var json = await response.Content.ReadAsStringAsync();
-                    
-                    try
-                    {
-                        var apiResponse = JsonConvert.DeserializeObject<ApiResponse<PartyListing>>(json);
-                        if (apiResponse != null && apiResponse.Results != null)
-                            return apiResponse;
-                    }
-                    catch (JsonSerializationException)
-                    {
-                        
-                    }
-                    
-                    try
-                    {
-                        var plainList = JsonConvert.DeserializeObject<List<PartyListing>>(json);
-                        if (plainList != null)
-                            return new ApiResponse<PartyListing> { Results = plainList, Count = plainList.Count };
-                    }
-                    catch (JsonSerializationException)
-                    {
-                        Svc.Log.Error($"Failed to deserialize listings response: {json}");
-                    }
-                }
-                
-                Svc.Log.Warning($"Failed to get listings: {response.StatusCode}");
-                return null;
-            }
-            catch (Exception ex)
-            {
-                Svc.Log.Error($"Error getting listings: {ex.Message}");
-                return null;
-            }
+            return await GetListingsInternalAsync(filters, pageUrl);
         });
+    }
+    
+    /// <summary>
+    /// Get party listings without debouncing (for background operations)
+    /// </summary>
+    /// <param name="filters">Optional filters to apply</param>
+    /// <param name="pageUrl">Optional specific page URL to fetch</param>
+    /// <returns>API response containing listings and pagination info</returns>
+    public async Task<ApiResponse<PartyListing>?> GetListingsAsync_NoDebounce(ListingFilters? filters = null, string? pageUrl = null)
+    {
+        return await GetListingsInternalAsync(filters, pageUrl);
+    }
+    
+    /// <summary>
+    /// Internal method for getting listings
+    /// </summary>
+    private async Task<ApiResponse<PartyListing>?> GetListingsInternalAsync(ListingFilters? filters = null, string? pageUrl = null)
+    {
+        try
+        {
+            string url;
+            
+            if (!string.IsNullOrEmpty(pageUrl))
+            {
+                url = pageUrl;
+            }
+            else
+            {
+                url = $"{Constants.ApiBaseUrl}/api/v1/listings/";
+                if (filters != null)
+                {
+                    var queryParams = filters.ToQueryParameters();
+                    if (queryParams.Count > 0)
+                    {
+                        var queryString = string.Join("&", queryParams.Select(kvp => $"{kvp.Key}={Uri.EscapeDataString(kvp.Value)}"));
+                        url += "?" + queryString;
+                    }
+                }
+            }
+            
+            var response = await _httpClient.GetAsync(url);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadAsStringAsync();
+                
+                try
+                {
+                    var apiResponse = JsonConvert.DeserializeObject<ApiResponse<PartyListing>>(json);
+                    if (apiResponse != null && apiResponse.Results != null)
+                        return apiResponse;
+                }
+                catch (JsonSerializationException)
+                {
+                    
+                }
+                
+                try
+                {
+                    var plainList = JsonConvert.DeserializeObject<List<PartyListing>>(json);
+                    if (plainList != null)
+                        return new ApiResponse<PartyListing> { Results = plainList, Count = plainList.Count };
+                }
+                catch (JsonSerializationException)
+                {
+                    Svc.Log.Error($"Failed to deserialize listings response: {json}");
+                }
+            }
+            
+            Svc.Log.Warning($"Failed to get listings: {response.StatusCode}");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Error getting listings: {ex.Message}");
+            return null;
+        }
     }
     
 
@@ -475,13 +510,13 @@ public async Task<JoinResult?> JoinListingAsync(string id)
     }
     
     /// <summary>
-    /// Join a party listing with a specified role.
+    /// Join a party listing with a specified job.
     /// </summary>
-    public async Task<JoinResult?> JoinListingWithRoleAsync(string id, string role)
+    public async Task<JoinResult?> JoinListingWithJobAsync(string id, string job)
     {
         try
         {
-            var requestData = new { role = role };
+            var requestData = new { job = job };
             var json = JsonConvert.SerializeObject(requestData);
             var content = new StringContent(json, Encoding.UTF8, "application/json");
             
@@ -505,12 +540,12 @@ public async Task<JoinResult?> JoinListingAsync(string id)
                 }
             }
 
-            Svc.Log.Warning($"Failed to join listing {id} with role {role}: {response.StatusCode}");
+            Svc.Log.Warning($"Failed to join listing {id} with job {job}: {response.StatusCode}");
             return new JoinResult { Success = false, Message = $"Failed to join party. Status code: {response.StatusCode}" };
         }
         catch (Exception ex)
         {
-            Svc.Log.Error($"Error joining listing {id} with role {role}: {ex.Message}");
+            Svc.Log.Error($"Error joining listing {id} with job {job}: {ex.Message}");
             return new JoinResult { Success = false, Message = "An unexpected error occurred." };
         }
     }
@@ -662,6 +697,7 @@ public async Task<JoinResult?> JoinListingAsync(string id)
     
     /// <summary>
     /// Get pending invitation notifications for party creators.
+    /// Note: This method intentionally bypasses debouncing since it's used by background notification workers
     /// </summary>
     public async Task<NotificationsResponse?> GetNotificationsAsync(long? since = null, string? listingId = null)
     {

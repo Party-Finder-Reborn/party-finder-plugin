@@ -32,11 +32,10 @@ namespace PartyFinderReborn.Windows
         private string _editParseRequirement = string.Empty;
         private string _editDatacenter = string.Empty;
         private string _editWorld = string.Empty;
-        private string _editPfCode = string.Empty;
         private string _newTag = string.Empty;
         private string _newStrategy = string.Empty;
-        private string _creatorRole = "DPS"; // Default role for creator
         private int _editMaxSize = 8; // Default party size
+        private string _editCreatorJob = string.Empty; // Creator job for new listings
 
         // Duty selection state
         private ContentFinderCondition? _selectedDuty;
@@ -92,11 +91,9 @@ namespace PartyFinderReborn.Windows
                 _editWorld = listing.World;
             }
             
-            _editPfCode = listing.PfCode;
             _editMaxSize = listing.MaxSize > 0 ? listing.MaxSize : 8; // Initialize party size with default 8
             _newTag = string.Empty;
             _newStrategy = string.Empty;
-            _creatorRole = "DPS"; // Reset to default
 
             _selectedDuty = ContentFinderService.GetContentFinderCondition(_editCfcId);
         }
@@ -109,8 +106,8 @@ namespace PartyFinderReborn.Windows
             
             DutySelectorModal.Draw();
             
-            // Draw role selection popup from base class
-            DrawRoleSelectionPopup();
+            // Draw job selection popup from base class
+            DrawJobSelectionPopup();
             
             base.Draw();
         }
@@ -228,22 +225,6 @@ namespace PartyFinderReborn.Windows
                 int previewIndex = 0;
                 ImGui.Combo("##world", ref previewIndex, preview, preview.Length);
                 ImGui.EndDisabled();
-            }
-            
-            // Party Finder Code
-            ImGui.Text("Party Finder Code (Optional)");
-            ImGui.InputText("##pfcode", ref _editPfCode, 10);
-            
-            // Creator Role display (only for create mode)
-            if (IsCreateMode)
-            {
-                ImGui.Text("Your Role *");
-                ImGui.Text($"Selected: {_creatorRole}");
-                ImGui.SameLine();
-                if (ImGui.SmallButton("Change Role"))
-                {
-                    ShowRoleSelectionPopup(OnCreatorRoleSelected);
-                }
             }
             
             // Status (only for existing listings)
@@ -453,7 +434,7 @@ namespace PartyFinderReborn.Windows
                 {
                     if (IsCreateMode)
                     {
-                        ShowRoleSelectionPopup(OnCreateWithRole);
+                        ShowJobSelectionPopup(OnCreateWithJob);
                     }
                     else
                     {
@@ -513,14 +494,9 @@ namespace PartyFinderReborn.Windows
             }
         }
         
-        private void OnCreatorRoleSelected(string role)
+        private void OnCreateWithJob(string job)
         {
-            _creatorRole = role;
-        }
-        
-        private void OnCreateWithRole(string role)
-        {
-            _creatorRole = role;
+            _editCreatorJob = job; // Store the selected job
             _ = SaveListingAsync();
         }
         
@@ -596,17 +572,12 @@ namespace PartyFinderReborn.Windows
                     ParseRequirement = _editParseRequirement,
                     Datacenter = _editDatacenter,
                     World = _editWorld,
-                    PfCode = _editPfCode.Trim(),
+                    PfCode = string.Empty,
                     Creator = Listing.Creator,
+                    CreatorJob = IsCreateMode ? _editCreatorJob : Listing.CreatorJob, // Set creator job for new listings
                     CreatedAt = Listing.CreatedAt,
                     UpdatedAt = DateTime.Now
                 };
-                
-                // Add creator role for new listings
-                if (IsCreateMode)
-                {
-                    updatedListing.CreatorRole = _creatorRole;
-                }
                 
                 ListingResult result;
                 if (IsCreateMode)

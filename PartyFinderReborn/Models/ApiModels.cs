@@ -71,15 +71,15 @@ public class UserProfile
 }
 
 /// <summary>
-/// Participant information with role
+/// Participant information with job
 /// </summary>
 public class ParticipantInfo
 {
     [JsonProperty("name")]
     public string Name { get; set; } = string.Empty;
     
-    [JsonProperty("role")]
-    public string Role { get; set; } = string.Empty;
+    [JsonProperty("job")]
+    public string Job { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -176,8 +176,8 @@ public class PartyListing
     [JsonProperty("creator_display_name")]
     public string CreatorDisplayName { get; set; } = string.Empty;
     
-    [JsonProperty("creator_role")]
-    public string CreatorRole { get; set; } = string.Empty;
+    [JsonProperty("creator_job")]
+    public string CreatorJob { get; set; } = string.Empty;
     
     // Computed properties
     public bool IsActive => Status == "active";
@@ -460,6 +460,9 @@ public class JoinResult
     
     [JsonProperty("failed_requirements")]
     public List<FailedRequirement> FailedRequirements { get; set; } = new();
+    
+    [JsonProperty("job")]
+    public string? Job { get; set; }
 }
 
 /// <summary>

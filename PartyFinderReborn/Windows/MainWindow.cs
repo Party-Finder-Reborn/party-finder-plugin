@@ -135,10 +135,15 @@ public class MainWindow : Window, IDisposable
             AvailableClickthrough = true
         });
 
-        // Load data on initialization
+        // Load user data first (this will set proper connection status)
         _ = LoadUserDataAsync();
-        _ = LoadPartyListingsAsync();
-        _ = LoadPopularTagsAsync();
+        
+        // Delay the initial listings load slightly to allow API validation to complete
+        _ = Task.Delay(500).ContinueWith(async _ => 
+        {
+            await LoadPartyListingsAsync();
+            await LoadPopularTagsAsync();
+        });
     }
 
     private async Task LoadUserDataAsync()
@@ -208,7 +213,15 @@ public class MainWindow : Window, IDisposable
             // Check if API key is valid before making request
             if (!Plugin.ConfigWindow.ShouldAllowApiRequests)
             {
-                Svc.Log.Warning("Skipping party listings load - API key validation required");
+                // Use debug level during startup to avoid spamming warnings
+                if (LastRefresh == DateTime.MinValue)
+                {
+                    Svc.Log.Debug("Skipping initial party listings load - API key validation in progress");
+                }
+                else
+                {
+                    Svc.Log.Warning("Skipping party listings load - API key validation required");
+                }
                 return;
             }
             
@@ -246,6 +259,53 @@ if (response != null)
         finally
         {
             IsLoading = false;
+        }
+    }
+    
+    /// <summary>
+    /// Load party listings without debouncing - used for background/automatic operations
+    /// </summary>
+    public async Task LoadPartyListingsAsync_Background(string? pageUrl = null)
+    {
+        try
+        {
+            // Check if API key is valid before making request
+            if (!Plugin.ConfigWindow.ShouldAllowApiRequests)
+            {
+                Svc.Log.Debug("Skipping background party listings load - API key validation required");
+                return;
+            }
+            
+            // Use the no-debounce version for background operations
+            var response = await Plugin.ApiService.GetListingsAsync_NoDebounce(CurrentFilters, pageUrl);
+            
+            if (response != null)
+            {
+                var newOnlineUserCount = await Plugin.ApiService.GetOnlineUserCountAsync();
+                _onlineUserCount = newOnlineUserCount;
+                _lastOnlineFetch = DateTime.Now;
+                _currentResponse = response;
+                PartyListings = response.Results;
+                _nextPageUrl = response.Next;
+                _prevPageUrl = response.Previous;
+                _totalCount = response.Count;
+                
+                ApplyFilters();
+                LastRefresh = DateTime.Now;
+
+                // Start notification workers for listings where the current user is the owner
+                foreach (var listing in PartyListings)
+                {
+                    if (listing.IsOwner)
+                    {
+                        Plugin.StartJoinNotificationWorker(listing.Id);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Debug($"Failed to load party listings in background: {ex.Message}");
         }
     }
 
@@ -375,7 +435,6 @@ if (response != null)
             ParseRequirement = "none",
             Datacenter = Plugin.WorldService.GetApiDatacenterName(Plugin.WorldService.GetCurrentPlayerHomeDataCenter() ?? ""),
             World = Plugin.WorldService.GetCurrentPlayerHomeWorld() ?? "",
-            PfCode = "",
             Creator = CurrentUserProfile,
             CreatedAt = DateTime.Now,
             UpdatedAt = DateTime.Now
