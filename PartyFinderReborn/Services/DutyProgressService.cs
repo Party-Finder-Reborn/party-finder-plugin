@@ -62,25 +62,27 @@ public class DutyProgressService : IDisposable
 
     /// <summary>
     /// Refreshes the local mirror of completed duties and prog points from the server.
-    /// Note: This is a lightweight refresh that doesn't pre-populate all data.
-    /// Individual API calls will cache data as needed.
+    /// This now loads duty completion data from the game state to ensure the mirror is populated.
     /// </summary>
-    public Task RefreshLocalMirrorAsync()
+    public async Task RefreshLocalMirrorAsync()
     {
         try
         {
-            // Clear local mirrors - they will be populated on-demand via API calls
+            // Clear local mirrors first
             _completedDutiesMirror.Clear();
             _seenProgPointsMirror.Clear();
             
-            Svc.Log.Info("Cleared local mirrors. Data will be populated on-demand via cached API calls.");
+            Svc.Log.Info("Cleared local mirrors. Repopulating from game state...");
+            
+            // Immediately repopulate the completed duties mirror from game state
+            await PopulateCompletedDutiesFromGameAsync();
+            
+            Svc.Log.Info($"Local mirror refresh completed. {_completedDutiesMirror.Count} completed duties loaded.");
         }
         catch (Exception ex)
         {
             Svc.Log.Error($"Failed to refresh local mirror: {ex.Message}");
         }
-        
-        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -98,14 +100,14 @@ public class DutyProgressService : IDisposable
             {
                 try
                 {
-                    if (UIState.IsInstanceContentCompleted(duty.RowId))
+                    if (UIState.IsInstanceContentCompleted(duty.Content.RowId))
                     {
-                        completedDutiesFromGame.Add(duty.RowId);
+                        completedDutiesFromGame.Add(duty.Content.RowId);
                     }
                 }
                 catch (Exception ex)
                 {
-                    Svc.Log.Warning($"Failed to check completion for duty {duty.RowId}: {ex.Message}");
+                    Svc.Log.Warning($"Failed to check completion for duty {duty.Content.RowId}: {ex.Message}");
                 }
             }
 
@@ -302,6 +304,41 @@ public class DutyProgressService : IDisposable
     public async Task RefreshProgressData()
     {
         await RefreshLocalMirrorAsync();
+    }
+    
+    /// <summary>
+    /// Populates the completed duties mirror from the game state without syncing to server
+    /// </summary>
+    private async Task PopulateCompletedDutiesFromGameAsync()
+    {
+        try
+        {
+            var allDuties = _contentFinderService.GetAllDuties();
+            var completedDutiesFromGame = new List<uint>();
+
+            // Check each duty against the game state using UIState.IsInstanceContentCompleted
+            foreach (var duty in allDuties)
+            {
+                try
+                {
+                    if (UIState.IsInstanceContentCompleted(duty.Content.RowId))
+                    {
+                        completedDutiesFromGame.Add(duty.Content.RowId);
+                        _completedDutiesMirror.Add(duty.Content.RowId);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Svc.Log.Warning($"Failed to check completion for duty {duty.Content.RowId}: {ex.Message}");
+                }
+            }
+
+            Svc.Log.Info($"Populated local mirror with {completedDutiesFromGame.Count} completed duties from game state.");
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"An error occurred while populating completed duties from game: {ex.Message}");
+        }
     }
     
     /// <summary>

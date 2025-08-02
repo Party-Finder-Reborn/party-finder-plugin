@@ -20,6 +20,10 @@ namespace PartyFinderReborn.Windows
     public class ViewListingWindow : BaseListingWindow
     {
         private const ImGuiWindowFlags WindowFlags = ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
+        
+        // Failed requirements popup state
+        private bool _showFailedRequirementsPopup = false;
+        private JoinResult? _failedJoinResult = null;
 
         public ViewListingWindow(Plugin plugin, PartyListing listing) 
             : base(plugin, listing, $"{plugin.ContentFinderService.GetDutyDisplayName(listing.CfcId)}##view_{listing.Id}")
@@ -43,6 +47,9 @@ public override void Draw()
 
         // Draw role selection popup from base class
         DrawRoleSelectionPopup();
+        
+        // Draw failed requirements popup
+        DrawFailedRequirementsPopup();
 
         // Draw loading spinner overlay if any async operation is in progress
         if (IsRefreshing || IsJoining || IsLeaving)
@@ -61,6 +68,12 @@ public override void Draw()
             {
                 Svc.Chat.Print($"[Party Finder Reborn] {joinResult.Message}");
                 await RefreshListingAsync();
+            }
+            else if (joinResult != null && joinResult.PfCode == "requirements_not_met" && joinResult.FailedRequirements.Any())
+            {
+                // Show failed requirements popup instead of just chat message
+                _failedJoinResult = joinResult;
+                _showFailedRequirementsPopup = true;
             }
             else
             {
@@ -168,7 +181,7 @@ public override void Draw()
         {
             return Listing.Status.ToLower() switch
             {
-                "active" => ("Active", Green),
+"active" => ("Active", new Vector4(0.2f, 0.6f, 0.2f, 1.0f)),
                 "full" => ("Full", Red),
                 "draft" => ("Draft", ImGuiColors.DalamudGrey),
                 "completed" => ("Completed", ImGuiColors.ParsedGreen),
@@ -474,9 +487,6 @@ public override void Draw()
         private void DrawSection(string title, Action content, ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags.None)
         {
             ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(4, 6));
-            ImGui.PushStyleColor(ImGuiCol.Header, ImGuiColors.DalamudGrey3);
-            ImGui.PushStyleColor(ImGuiCol.HeaderHovered, ImGuiColors.DalamudGrey2);
-            ImGui.PushStyleColor(ImGuiCol.HeaderActive, ImGuiColors.DalamudGrey);
             
             if (ImGui.CollapsingHeader(title, flags))
             {
@@ -487,7 +497,6 @@ public override void Draw()
                 ImGui.Spacing();
             }
             
-            ImGui.PopStyleColor(3);
             ImGui.PopStyleVar();
         }
 
@@ -579,6 +588,107 @@ private void SendInGamePartyJoinRequest()
                     Svc.Chat.PrintError($"Error sending join request: {ex.Message}");
                 }
             });
+        }
+        
+        private void DrawFailedRequirementsPopup()
+        {
+            if (!_showFailedRequirementsPopup || _failedJoinResult == null)
+                return;
+
+            ImGui.SetNextWindowSize(new Vector2(500, 400), ImGuiCond.FirstUseEver);
+            ImGui.SetNextWindowPos(ImGui.GetMainViewport().GetCenter(), ImGuiCond.FirstUseEver, new Vector2(0.5f, 0.5f));
+            
+            if (ImGui.BeginPopupModal("Join Requirements Not Met##ViewListing", ref _showFailedRequirementsPopup, ImGuiWindowFlags.AlwaysAutoResize))
+            {
+                // Header with error icon
+                ImGui.PushFont(UiBuilder.IconFont);
+                ImGui.PushStyleColor(ImGuiCol.Text, ImGuiColors.DalamudRed);
+                ImGui.TextUnformatted(FontAwesomeIcon.ExclamationTriangle.ToIconString());
+                ImGui.PopStyleColor();
+                ImGui.PopFont();
+                ImGui.SameLine();
+                ImGui.TextWrapped(_failedJoinResult.Message);
+                
+                ImGui.Spacing();
+                ImGui.Separator();
+                ImGui.Spacing();
+                
+                // List failed requirements
+                ImGui.Text("Missing Requirements:");
+                ImGui.Spacing();
+                
+                foreach (var requirement in _failedJoinResult.FailedRequirements)
+                {
+                    ImGui.Bullet();
+                    ImGui.SameLine();
+                    
+                    if (requirement.Type == "duty_completion")
+                    {
+                        ImGui.PushFont(UiBuilder.IconFont);
+                        ImGui.PushStyleColor(ImGuiCol.Text, ImGuiColors.DalamudRed);
+                        ImGui.TextUnformatted(FontAwesomeIcon.Times.ToIconString());
+                        ImGui.PopStyleColor();
+                        ImGui.PopFont();
+                        ImGui.SameLine();
+                        
+                        var dutyName = requirement.DutyId.HasValue 
+                            ? ContentFinderService.GetDutyDisplayName((uint)requirement.DutyId.Value)
+                            : $"Duty #{requirement.DutyId}";
+                        ImGui.TextWrapped($"Complete: {dutyName}");
+                    }
+                    else if (requirement.Type == "progress_point")
+                    {
+                        ImGui.PushFont(UiBuilder.IconFont);
+                        ImGui.PushStyleColor(ImGuiCol.Text, ImGuiColors.DalamudRed);
+                        ImGui.TextUnformatted(FontAwesomeIcon.Times.ToIconString());
+                        ImGui.PopStyleColor();
+                        ImGui.PopFont();
+                        ImGui.SameLine();
+                        
+                        var actionName = requirement.ActionId.HasValue 
+                            ? ActionNameService.Get((uint)requirement.ActionId.Value)
+                            : $"Action #{requirement.ActionId}";
+                        var dutyName = requirement.DutyId.HasValue 
+                            ? ContentFinderService.GetDutyDisplayName((uint)requirement.DutyId.Value)
+                            : $"Duty #{requirement.DutyId}";
+                        ImGui.TextWrapped($"See: {actionName} in {dutyName}");
+                    }
+                    else
+                    {
+                        ImGui.PushFont(UiBuilder.IconFont);
+                        ImGui.PushStyleColor(ImGuiCol.Text, ImGuiColors.DalamudRed);
+                        ImGui.TextUnformatted(FontAwesomeIcon.Times.ToIconString());
+                        ImGui.PopStyleColor();
+                        ImGui.PopFont();
+                        ImGui.SameLine();
+                        ImGui.TextWrapped(requirement.Message);
+                    }
+                }
+                
+                ImGui.Spacing();
+                ImGui.Separator();
+                ImGui.Spacing();
+                
+                // Close button
+                var buttonSize = new Vector2(80, 0);
+                var availableWidth = ImGui.GetContentRegionAvail().X;
+                var buttonPos = (availableWidth - buttonSize.X) / 2;
+                ImGui.SetCursorPosX(buttonPos);
+                
+                if (ImGui.Button("OK", buttonSize))
+                {
+                    _showFailedRequirementsPopup = false;
+                    _failedJoinResult = null;
+                }
+                
+                ImGui.EndPopup();
+            }
+            
+            // Open the popup if it should be shown
+            if (_showFailedRequirementsPopup && !ImGui.IsPopupOpen("Join Requirements Not Met##ViewListing"))
+            {
+                ImGui.OpenPopup("Join Requirements Not Met##ViewListing");
+            }
         }
 
     }

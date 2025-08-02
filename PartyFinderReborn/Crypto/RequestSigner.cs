@@ -20,6 +20,7 @@ namespace PartyFinderReborn.Crypto
     {
         private readonly ECPrivateKeyParameters _privateKey;
         private readonly ISigner _signer;
+        private readonly object _signerLock = new object();
         private bool _disposed;
 
         /// <summary>
@@ -107,9 +108,15 @@ namespace PartyFinderReborn.Crypto
             try
             {
                 // Sign the canonical string using BouncyCastle
+                // Use lock to ensure thread safety since ISigner is not thread-safe
                 var canonicalBytes = Encoding.UTF8.GetBytes(canonicalString);
-                _signer.BlockUpdate(canonicalBytes, 0, canonicalBytes.Length);
-                var signature = _signer.GenerateSignature();
+                byte[] signature;
+                
+                lock (_signerLock)
+                {
+                    _signer.BlockUpdate(canonicalBytes, 0, canonicalBytes.Length);
+                    signature = _signer.GenerateSignature();
+                }
                 
                 // Encode signature as base64
                 var signatureB64 = Convert.ToBase64String(signature);

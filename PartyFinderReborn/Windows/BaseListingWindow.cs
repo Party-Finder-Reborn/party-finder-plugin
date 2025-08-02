@@ -125,6 +125,13 @@ public abstract class BaseListingWindow : Window, IDisposable
         
         try
         {
+            // Check if API key is valid before making request
+            if (!Plugin.ConfigWindow.ShouldAllowApiRequests)
+            {
+                Svc.Log.Debug("Skipping popular tags load - API key validation required");
+                return;
+            }
+            
             var response = await ApiService.GetPopularTagsAsync();
             if (response != null)
             {
@@ -150,6 +157,13 @@ public abstract class BaseListingWindow : Window, IDisposable
         
         try
         {
+            // Check if API key is valid before making request
+            if (!Plugin.ConfigWindow.ShouldAllowApiRequests)
+            {
+                Svc.Log.Warning("Cannot refresh listing - API key validation required");
+                return;
+            }
+            
             Svc.Log.Info($"Refreshing party listing {Listing.Id}");
             
             var refreshedListing = await ApiService.GetListingAsync(Listing.Id);
@@ -187,6 +201,13 @@ public abstract class BaseListingWindow : Window, IDisposable
         {
             var dutyName = ContentFinderService.GetDutyDisplayName(dutyId);
             var isCompleted = DutyProgressService.IsDutyCompleted(dutyId);
+            
+            // If synchronous check says not completed, try async fallback for more thorough check
+            if (!isCompleted)
+            {
+                // Start async check but don't await - this will populate the cache for next time
+                _ = Task.Run(async () => await DutyProgressService.IsDutyCompletedAsync(dutyId));
+            }
             
             if (isCompleted)
             {
@@ -270,6 +291,13 @@ public abstract class BaseListingWindow : Window, IDisposable
         
         try
         {
+            // Check if API key is valid before making request
+            if (!Plugin.ConfigWindow.ShouldAllowApiRequests)
+            {
+                Svc.Chat.PrintError("[Party Finder Reborn] Cannot join party - API key validation required");
+                return;
+            }
+            
             Svc.Log.Info($"Attempting to join party listing {Listing.Id}");
             
             var joinResult = await ApiService.JoinListingAsync(Listing.Id);
@@ -335,6 +363,13 @@ public abstract class BaseListingWindow : Window, IDisposable
         
         try
         {
+            // Check if API key is valid before making request
+            if (!Plugin.ConfigWindow.ShouldAllowApiRequests)
+            {
+                Svc.Chat.PrintError("[Party Finder Reborn] Cannot leave party - API key validation required");
+                return;
+            }
+            
             Svc.Log.Info($"Attempting to leave party listing {Listing.Id}");
             
             var leaveResult = await ApiService.LeaveListingAsync(Listing.Id);
@@ -500,6 +535,13 @@ public abstract class BaseListingWindow : Window, IDisposable
 
         try
         {
+            // Check if API key is valid before making request
+            if (!Plugin.ConfigWindow.ShouldAllowApiRequests)
+            {
+                Svc.Chat.PrintError("[Party Finder Reborn] Cannot close listing - API key validation required");
+                return;
+            }
+            
             Svc.Log.Info($"Closing party listing {Listing.Id}");
             var success = await ApiService.DeleteListingAsync(Listing.Id);
 

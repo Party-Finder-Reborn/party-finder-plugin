@@ -11,6 +11,7 @@ using Dalamud.Interface;
 using Dalamud.Interface.Components;
 using PartyFinderReborn.Utils;
 using PartyFinderReborn.Services;
+using System.Diagnostics;
 
 namespace PartyFinderReborn.Windows;
 
@@ -57,6 +58,82 @@ public class MainWindow : Window, IDisposable
         PopularTags = new List<PopularItem>();
         NewFilterTag = "";
         _lastOnlineFetch = DateTime.MinValue;
+        
+        // Add title bar buttons
+        TitleBarButtons.Add(new Window.TitleBarButton()
+        {
+            Icon = FontAwesomeIcon.Cog,
+            ShowTooltip = () =>
+            {
+                ImGui.BeginTooltip();
+                ImGui.Text("Open Configuration");
+                ImGui.EndTooltip();
+            },
+            Priority = 3,
+            Click = _ =>
+            {
+                Plugin.ToggleConfigUI();
+            },
+            AvailableClickthrough = true
+        });
+        
+        TitleBarButtons.Add(new Window.TitleBarButton()
+        {
+            Icon = FontAwesomeIcon.Heart,
+            ShowTooltip = () =>
+            {
+                ImGui.BeginTooltip();
+                ImGui.Text("Support the developer on Ko-fi");
+                ImGui.EndTooltip();
+            },
+            Priority = 2,
+            Click = _ =>
+            {
+                try
+                {
+                    Process.Start(new ProcessStartInfo()
+                    {
+                        FileName = "https://ko-fi.com/nostrathomas",
+                        UseShellExecute = true,
+                        Verb = String.Empty
+                    });
+                }
+                catch
+                {
+                    // ignored
+                }
+            },
+            AvailableClickthrough = true
+        });
+        
+        TitleBarButtons.Add(new Window.TitleBarButton()
+        {
+            Icon = FontAwesomeIcon.UserCircle,
+            ShowTooltip = () =>
+            {
+                ImGui.BeginTooltip();
+                ImGui.Text("Manage your account on the web");
+                ImGui.EndTooltip();
+            },
+            Priority = 1,
+            Click = _ =>
+            {
+                try
+                {
+                    Process.Start(new ProcessStartInfo()
+                    {
+                        FileName = "https://partyfinder.nostrathomas.net/account/",
+                        UseShellExecute = true,
+                        Verb = String.Empty
+                    });
+                }
+                catch
+                {
+                    // ignored
+                }
+            },
+            AvailableClickthrough = true
+        });
 
         // Load data on initialization
         _ = LoadUserDataAsync();
@@ -68,6 +145,16 @@ public class MainWindow : Window, IDisposable
     {
         try
         {
+            // Check if API key is valid before making request
+            if (!Plugin.ConfigWindow.ShouldAllowApiRequests)
+            {
+                ConnectionStatus = string.IsNullOrEmpty(Plugin.Configuration.ApiKey) 
+                    ? "No API Key" 
+                    : "Invalid API Key";
+                CurrentUserProfile = null;
+                return;
+            }
+            
             ConnectionStatus = "Connecting...";
             var profile = await Plugin.ApiService.GetUserProfileAsync();
             CurrentUserProfile = profile;
@@ -118,6 +205,13 @@ public class MainWindow : Window, IDisposable
     {
         try
         {
+            // Check if API key is valid before making request
+            if (!Plugin.ConfigWindow.ShouldAllowApiRequests)
+            {
+                Svc.Log.Warning("Skipping party listings load - API key validation required");
+                return;
+            }
+            
             IsLoading = true;
             var response = await Plugin.ApiService.GetListingsAsync(CurrentFilters, pageUrl);
             
@@ -165,6 +259,13 @@ if (response != null)
     {
         try
         {
+            // Check if API key is valid before making request
+            if (!Plugin.ConfigWindow.ShouldAllowApiRequests)
+            {
+                Svc.Log.Debug("Skipping popular tags load - API key validation required");
+                return;
+            }
+            
             var response = await Plugin.ApiService.GetPopularTagsAsync();
             if (response != null)
             {
@@ -407,8 +508,27 @@ if (response != null)
         // Connection status and user info in a header row
         ImGui.Columns(3, "HeaderColumns", false);
         
-        // Left: Connection status
-        ImGui.Text($"Status: {ConnectionStatus}");
+        // Left: Connection status with helpful color coding
+        var statusColor = ConnectionStatus switch
+        {
+            "Connected" => new Vector4(0.0f, 1.0f, 0.0f, 1.0f), // Green
+            "Connecting..." => new Vector4(1.0f, 1.0f, 0.0f, 1.0f), // Yellow
+            "No API Key" => new Vector4(1.0f, 0.5f, 0.0f, 1.0f), // Orange
+            "Invalid API Key" => new Vector4(1.0f, 0.0f, 0.0f, 1.0f), // Red
+            _ => new Vector4(0.5f, 0.5f, 0.5f, 1.0f) // Gray for other statuses
+        };
+        
+        ImGui.TextColored(statusColor, $"Status: {ConnectionStatus}");
+        
+        // Show tooltip with helpful information for API key issues
+        if (ImGui.IsItemHovered())
+        {
+            if (ConnectionStatus == "No API Key" || ConnectionStatus == "Invalid API Key")
+            {
+                ImGui.SetTooltip("Click the gear icon (⚙) to open configuration and set up your API key");
+            }
+        }
+        
         if (IsLoading)
         {
             ImGui.SameLine();
@@ -686,14 +806,14 @@ if (response != null)
                 // Description column
                 if (ImGui.TableNextColumn())
                 {
-                    var description = string.IsNullOrWhiteSpace(listing.Description) ? "No description" : listing.Description;
-                    // Use dynamic text wrapping for description
-                    ImGui.PushTextWrapPos(ImGui.GetCursorPos().X + ImGui.GetColumnWidth());
-                    ImGui.TextWrapped(description);
-                    ImGui.PopTextWrapPos();
-                    
-                    // Tooltip for full text if description is long
-                    if (ImGui.IsItemHovered() && description.Length > 80)
+var description = string.IsNullOrWhiteSpace(listing.Description) ? "No description" : listing.Description;
+                    var maxLength = 50;
+                    var displayText = description.Length > maxLength ? description.Substring(0, maxLength) + "..." : description;
+
+                    ImGui.Text(displayText);
+
+                    // Tooltip for full description
+                    if (ImGui.IsItemHovered())
                     {
                         ImGui.SetTooltip(description);
                     }

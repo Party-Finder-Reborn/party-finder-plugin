@@ -65,7 +65,10 @@ public class PluginSelectorModal
     
     private List<ISelectableItem<IExposedPlugin>> WrapPlugins(IEnumerable<IExposedPlugin> plugins)
     {
-        return plugins.Select(plugin => new PluginSelectableItem(plugin) as ISelectableItem<IExposedPlugin>).ToList();
+        return plugins
+            .Select(plugin => new PluginSelectableItem(plugin) as ISelectableItem<IExposedPlugin>)
+            .OrderBy(item => item.DisplayText)
+            .ToList();
     }
     
     /// <summary>

@@ -1,0 +1,27 @@
+{
+            "Author": "NostraThomas",
+            "Name": "Party Finder Reborn",
+            "InternalName": "PartyFinderReborn",
+            "Description": "Connect with fellow Warriors of Light and find your perfect party composition with our modern, feature-rich party matching system.",
+            "ApplicableVersion": "any",
+            "DalamudApiLevel": 12,
+            "TestingDalamudApiLevel": 12,
+            "Tags": [
+                "party",
+                "finder",
+                "matching",
+                "social",
+                "ui"
+            ],
+            "CategoryTags": [
+                "social"
+            ],
+            "LoadRequiredState": 0,
+            "LoadSync": False,
+            "CanUnloadAsync": True,
+            "LoadPriority": 0,
+            "IsTestingExclusive": False,
+            "Punchline": "A modern party matching system for Final Fantasy XIV",
+            "AcceptsFeedback": True,
+            "IconUrl": "https://raw.githubusercontent.com/FFXIV-CombatReborn/RebornAssets/main/IconAssets/PFR_Icon.png"
+}

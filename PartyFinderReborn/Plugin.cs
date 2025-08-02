@@ -37,10 +37,11 @@ public sealed class Plugin : IDalamudPlugin
     public PluginService PluginService { get; init; }
 
     public readonly WindowSystem WindowSystem = new("PartyFinderReborn");
-    private ConfigWindow ConfigWindow { get; init; }
-    private MainWindow MainWindow { get; init; }
+    public ConfigWindow ConfigWindow { get; init; }
+    public MainWindow MainWindow { get; init; }
 
     private DateTime lastFrameworkUpdate = DateTime.Now;
+    private DateTime lastBackgroundRefresh = DateTime.Now;
     private readonly Dictionary<string, CancellationTokenSource> _notificationWorkers = new();
     private readonly Dictionary<string, long> _lastNotificationTimestamps = new();
     private readonly Dictionary<uint, Action<uint, SeString>> _chatLinkHandlers = new();
@@ -104,6 +105,23 @@ public sealed class Plugin : IDalamudPlugin
         
         // Subscribe to configuration changes
         Configuration.ConfigUpdated += OnConfigurationUpdated;
+        
+        // Validate API key on startup if one exists
+        if (!string.IsNullOrEmpty(Configuration.ApiKey))
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await ConfigWindow.ValidateApiKeyOnStartupAsync();
+                    Svc.Log.Info("API key validation completed on startup");
+                }
+                catch (Exception ex)
+                {
+                    Svc.Log.Warning($"Failed to validate API key on startup: {ex.Message}");
+                }
+            });
+        }
 
         Svc.Log.Info("Party Finder Reborn initialized successfully!");
     }
@@ -243,6 +261,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         var now = DateTime.Now;
         var elapsed = now - lastFrameworkUpdate;
+        var backgroundElapsed = now - lastBackgroundRefresh;
 
         // Auto-refresh every 60 seconds (hardcoded)
         if (elapsed.TotalSeconds >= 60)
@@ -254,6 +273,37 @@ public sealed class Plugin : IDalamudPlugin
             {
                 _ = MainWindow.LoadPartyListingsAsync();
             }
+        }
+        
+        // Background refresh every 5 minutes to keep online count accurate even when windows are closed
+        if (backgroundElapsed.TotalMinutes >= 5)
+        {
+            lastBackgroundRefresh = now;
+            
+            // Perform a lightweight user profile refresh to maintain API activity
+            _ = PerformBackgroundRefreshAsync();
+        }
+    }
+    
+    /// <summary>
+    /// Performs a lightweight background refresh to maintain user presence and update online count
+    /// </summary>
+    private async Task PerformBackgroundRefreshAsync()
+    {
+        try
+        {
+            // Check if API key is valid before making request
+            if (string.IsNullOrEmpty(Configuration.ApiKey) || !ConfigWindow.ShouldAllowApiRequests)
+            {
+                return;
+            }
+            
+            // Just fetch the user profile - this is lightweight and maintains our presence in the online count
+            await ApiService.GetUserProfileAsync();
+        }
+        catch
+        {
+            // Silent failure - we don't want to spam logs for background operations
         }
     }
     

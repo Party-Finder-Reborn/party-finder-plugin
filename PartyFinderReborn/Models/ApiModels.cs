@@ -457,6 +457,27 @@ public class JoinResult
 
     [JsonProperty("max_size")]
     public int MaxSize { get; set; }
+    
+    [JsonProperty("failed_requirements")]
+    public List<FailedRequirement> FailedRequirements { get; set; } = new();
+}
+
+/// <summary>
+/// Represents a failed join requirement
+/// </summary>
+public class FailedRequirement
+{
+    [JsonProperty("type")]
+    public string Type { get; set; } = string.Empty;
+    
+    [JsonProperty("duty_id")]
+    public int? DutyId { get; set; }
+    
+    [JsonProperty("action_id")]
+    public int? ActionId { get; set; }
+    
+    [JsonProperty("message")]
+    public string Message { get; set; } = string.Empty;
 }
 
 /// <summary>

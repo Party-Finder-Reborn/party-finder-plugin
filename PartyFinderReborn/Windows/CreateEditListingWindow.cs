@@ -278,7 +278,20 @@ namespace PartyFinderReborn.Windows
             // Item Level Requirements
             ImGui.Text("Item Level Requirements");
             ImGui.SliderInt("Min Item Level##minilvl", ref _editMinItemLevel, 0, 999);
+            
+            // Sanitize min item level input to prevent invalid values
+            if (_editMinItemLevel < 0)
+                _editMinItemLevel = 0;
+            else if (_editMinItemLevel > 999)
+                _editMinItemLevel = 999;
+            
             ImGui.SliderInt("Max Item Level##maxilvl", ref _editMaxItemLevel, 0, 999);
+            
+            // Sanitize max item level input to prevent invalid values
+            if (_editMaxItemLevel < 0)
+                _editMaxItemLevel = 0;
+            else if (_editMaxItemLevel > 999)
+                _editMaxItemLevel = 999;
             
             // Required Plugins Modal
             PluginSelectorModal.Draw();
@@ -521,6 +534,13 @@ namespace PartyFinderReborn.Windows
         
         private async Task SaveListingAsync()
         {
+            // Check if API key is valid before making request
+            if (!Plugin.ConfigWindow.ShouldAllowApiRequests)
+            {
+                Svc.Chat.PrintError("[Party Finder Reborn] Cannot save listing - API key validation required");
+                return;
+            }
+            
             if (_editCfcId == 0)
             {
                 Svc.Log.Warning("Content Finder ID is required");

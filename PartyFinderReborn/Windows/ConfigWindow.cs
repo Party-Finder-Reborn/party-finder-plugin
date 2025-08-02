@@ -1,13 +1,23 @@
 using System;
 using System.Numerics;
+using System.Threading.Tasks;
 using Dalamud.Interface.Windowing;
 using ImGuiNET;
+using PartyFinderReborn.Services;
+using Dalamud.Interface;
 
 namespace PartyFinderReborn.Windows;
 
 public class ConfigWindow : Window, IDisposable
 {
+    private Plugin Plugin;
     private Configuration Configuration;
+    private PartyFinderApiService ApiService;
+    
+    // API key validation state
+    private bool _isValidatingApiKey = false;
+    private bool? _apiKeyValid = null;
+    private string _lastValidatedApiKey = string.Empty;
 
     public ConfigWindow(Plugin plugin) : base("Party Finder Reborn Configuration##config_window")
     {
@@ -16,10 +26,130 @@ public class ConfigWindow : Window, IDisposable
         Size = new Vector2(500, 600);
         SizeCondition = ImGuiCond.FirstUseEver;
 
+        Plugin = plugin;
         Configuration = plugin.Configuration;
+        ApiService = plugin.ApiService;
     }
 
     public void Dispose() { }
+    
+    /// <summary>
+    /// Validates the API key on plugin startup (public method)
+    /// </summary>
+    public async Task ValidateApiKeyOnStartupAsync()
+    {
+        await ValidateApiKeyAsync();
+    }
+    
+    /// <summary>
+    /// Validates the current API key asynchronously
+    /// </summary>
+    private async Task ValidateApiKeyAsync()
+    {
+        var previousValidationState = _apiKeyValid;
+        
+        if (string.IsNullOrEmpty(Configuration.ApiKey))
+        {
+            _apiKeyValid = false;
+            _lastValidatedApiKey = string.Empty;
+        }
+        else
+        {
+            // Don't validate the same key multiple times
+            if (_lastValidatedApiKey == Configuration.ApiKey && _apiKeyValid.HasValue)
+            {
+                return;
+            }
+            
+            _isValidatingApiKey = true;
+            _lastValidatedApiKey = Configuration.ApiKey;
+            
+            try
+            {
+                var isValid = await ApiService.TestConnectionAsync();
+                _apiKeyValid = isValid;
+            }
+            catch (Exception)
+            {
+                _apiKeyValid = false;
+            }
+            finally
+            {
+                _isValidatingApiKey = false;
+            }
+        }
+        
+        // If validation state changed from invalid to valid, refresh the main window data
+        if (previousValidationState != true && _apiKeyValid == true)
+        {
+            _ = Plugin.MainWindow.RefreshAllAuthenticatedDataAsync();
+        }
+    }
+    
+    /// <summary>
+    /// Shows the API key validation feedback (checkmark, X, or loading spinner)
+    /// </summary>
+    private void ShowApiKeyValidationFeedback()
+    {
+        if (string.IsNullOrEmpty(Configuration.ApiKey))
+        {
+            // No feedback when API key is empty
+            return;
+        }
+        
+        if (_isValidatingApiKey)
+        {
+            // Show loading indicator
+            ImGui.PushFont(UiBuilder.IconFont);
+            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 0.0f, 1.0f));
+            ImGui.TextUnformatted(FontAwesomeIcon.Spinner.ToIconString());
+            ImGui.PopStyleColor();
+            ImGui.PopFont();
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip("Validating API key...");
+            }
+        }
+        else if (_apiKeyValid.HasValue)
+        {
+            if (_apiKeyValid.Value)
+            {
+                // Show green checkmark
+                ImGui.PushFont(UiBuilder.IconFont);
+                ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.0f, 1.0f, 0.0f, 1.0f));
+                ImGui.TextUnformatted(FontAwesomeIcon.Check.ToIconString());
+                ImGui.PopStyleColor();
+                ImGui.PopFont();
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.SetTooltip("API key is valid");
+                }
+            }
+            else
+            {
+                // Show red X
+                ImGui.PushFont(UiBuilder.IconFont);
+                ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.0f, 0.0f, 1.0f));
+                ImGui.TextUnformatted(FontAwesomeIcon.Times.ToIconString());
+                ImGui.PopStyleColor();
+                ImGui.PopFont();
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.SetTooltip("API key is invalid or server is unreachable");
+                }
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Checks if the API key is valid (for use by other services)
+    /// </summary>
+    public bool IsApiKeyValid => _apiKeyValid == true;
+    
+    /// <summary>
+    /// Gets whether API requests should proceed (API key is present and valid)
+    /// </summary>
+    public bool ShouldAllowApiRequests => !string.IsNullOrEmpty(Configuration.ApiKey) && IsApiKeyValid;
 
     public override void Draw()
     {
@@ -62,11 +192,31 @@ public class ConfigWindow : Window, IDisposable
             {
                 Configuration.ApiKey = apiKey;
                 Configuration.Save();
+                
+                // Reset validation state when API key changes
+                _apiKeyValid = null;
+                _lastValidatedApiKey = string.Empty;
+                
+                // Trigger validation if key is not empty
+                if (!string.IsNullOrEmpty(apiKey))
+                {
+                    _ = ValidateApiKeyAsync();
+                }
             }
+            
+            // Show validation feedback next to the API key field
+            ImGui.SameLine();
+            ShowApiKeyValidationFeedback();
             
             if (ImGui.IsItemHovered())
             {
                 ImGui.SetTooltip("Your API key for accessing the Party Finder server");
+            }
+            
+            // Validate on first load if we have an API key
+            if (_apiKeyValid == null && !string.IsNullOrEmpty(Configuration.ApiKey) && !_isValidatingApiKey)
+            {
+                _ = ValidateApiKeyAsync();
             }
         }
         

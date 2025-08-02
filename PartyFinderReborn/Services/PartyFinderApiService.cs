@@ -494,7 +494,9 @@ public async Task<JoinResult?> JoinListingAsync(string id)
                 return result;
             }
             
-            if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
+            // Handle both Conflict (409) and BadRequest (400) - both can contain detailed error info
+            if (response.StatusCode == System.Net.HttpStatusCode.Conflict || 
+                response.StatusCode == System.Net.HttpStatusCode.BadRequest)
             {
                 var responseJson = await response.Content.ReadAsStringAsync();
                 var result = JsonConvert.DeserializeObject<JoinResult>(responseJson);
