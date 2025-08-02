@@ -268,7 +268,7 @@ public async Task<ApiResponse<PartyListing>?> GetListingsAsync(ListingFilters? f
     /// <summary>
     /// Create a new party listing
     /// </summary>
-public async Task<PartyListing?> CreateListingAsync(PartyListing listing)
+public async Task<ListingResult> CreateListingAsync(PartyListing listing)
     {
         return await _debounceService.RunIfAllowedAsync(ApiOperationType.Write, async () => 
         {
@@ -283,26 +283,69 @@ public async Task<PartyListing?> CreateListingAsync(PartyListing listing)
                 {
                     var responseJson = await response.Content.ReadAsStringAsync();
                     var result = JsonConvert.DeserializeObject<PartyListing>(responseJson);
-                    return result;
+                    return new ListingResult
+                    {
+                        Success = true,
+                        Listing = result
+                    };
                 }
                 
-                var errorContent = await response.Content.ReadAsStringAsync();
+                // Handle content moderation failure (422 Unprocessable Entity)
+                if (response.StatusCode == System.Net.HttpStatusCode.UnprocessableEntity)
+                {
+                    var errorContent = await response.Content.ReadAsStringAsync();
+                    try
+                    {
+                        var errorResponse = JsonConvert.DeserializeObject<Dictionary<string, string>>(errorContent);
+                        var moderationMessage = errorResponse?.GetValueOrDefault("content_moderation");
+                        
+                        if (!string.IsNullOrEmpty(moderationMessage))
+                        {
+                            return new ListingResult
+                            {
+                                Success = false,
+                                ContentModerationFailed = true,
+                                ModerationReason = moderationMessage,
+                                ErrorMessage = "Content moderation failed"
+                            };
+                        }
+                    }
+                    catch (JsonSerializationException)
+                    {
+                        // If we can't parse the error response, fall through to generic error handling
+                    }
+                }
+                
+                var errorContent2 = await response.Content.ReadAsStringAsync();
                 Svc.Log.Warning($"Failed to create listing: {response.StatusCode}");
-                Svc.Log.Warning($"Error details: {errorContent}");
-                return null;
+                Svc.Log.Warning($"Error details: {errorContent2}");
+                
+                return new ListingResult
+                {
+                    Success = false,
+                    ErrorMessage = $"Failed to create listing: {response.StatusCode}"
+                };
             }
             catch (Exception ex)
             {
                 Svc.Log.Error($"Error creating listing: {ex.Message}");
-                return null;
+                return new ListingResult
+                {
+                    Success = false,
+                    ErrorMessage = $"Error creating listing: {ex.Message}"
+                };
             }
-        });
+        }) ?? new ListingResult
+        {
+            Success = false,
+            ErrorMessage = "Request was throttled. Please try again later."
+        };
     }
     
     /// <summary>
     /// Update an existing party listing
     /// </summary>
-public async Task<PartyListing?> UpdateListingAsync(string id, PartyListing listing)
+public async Task<ListingResult> UpdateListingAsync(string id, PartyListing listing)
     {
         return await _debounceService.RunIfAllowedAsync(ApiOperationType.Write, async () => 
         {
@@ -317,20 +360,63 @@ public async Task<PartyListing?> UpdateListingAsync(string id, PartyListing list
                 {
                     var responseJson = await response.Content.ReadAsStringAsync();
                     var result = JsonConvert.DeserializeObject<PartyListing>(responseJson);
-                    return result;
+                    return new ListingResult
+                    {
+                        Success = true,
+                        Listing = result
+                    };
                 }
                 
-                var errorContent = await response.Content.ReadAsStringAsync();
+                // Handle content moderation failure (422 Unprocessable Entity)
+                if (response.StatusCode == System.Net.HttpStatusCode.UnprocessableEntity)
+                {
+                    var errorContent = await response.Content.ReadAsStringAsync();
+                    try
+                    {
+                        var errorResponse = JsonConvert.DeserializeObject<Dictionary<string, string>>(errorContent);
+                        var moderationMessage = errorResponse?.GetValueOrDefault("content_moderation");
+                        
+                        if (!string.IsNullOrEmpty(moderationMessage))
+                        {
+                            return new ListingResult
+                            {
+                                Success = false,
+                                ContentModerationFailed = true,
+                                ModerationReason = moderationMessage,
+                                ErrorMessage = "Content moderation failed"
+                            };
+                        }
+                    }
+                    catch (JsonSerializationException)
+                    {
+                        // If we can't parse the error response, fall through to generic error handling
+                    }
+                }
+                
+                var errorContent2 = await response.Content.ReadAsStringAsync();
                 Svc.Log.Warning($"Failed to update listing {id}: {response.StatusCode}");
-                Svc.Log.Warning($"Error details: {errorContent}");
-                return null;
+                Svc.Log.Warning($"Error details: {errorContent2}");
+                
+                return new ListingResult
+                {
+                    Success = false,
+                    ErrorMessage = $"Failed to update listing: {response.StatusCode}"
+                };
             }
             catch (Exception ex)
             {
                 Svc.Log.Error($"Error updating listing {id}: {ex.Message}");
-                return null;
+                return new ListingResult
+                {
+                    Success = false,
+                    ErrorMessage = $"Error updating listing: {ex.Message}"
+                };
             }
-        });
+        }) ?? new ListingResult
+        {
+            Success = false,
+            ErrorMessage = "Request was throttled. Please try again later."
+        };
     }
     
     /// <summary>
@@ -631,6 +717,35 @@ public async Task<JoinResult?> JoinListingAsync(string id)
         _httpClient?.Dispose();
     }
 
+    /// <summary>
+    /// Get the current count of online users
+    /// </summary>
+    public async Task<int?> GetOnlineUserCountAsync()
+    {
+        try
+        {
+            var response = await _httpClient.GetAsync($"{Constants.ApiBaseUrl}/api/core/online-users/");
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadAsStringAsync();
+                var result = JsonConvert.DeserializeObject<Dictionary<string, int>>(json);
+                if (result != null && result.TryGetValue("online_users", out var onlineUsers))
+                {
+                    return onlineUsers;
+                }
+            }
+            
+            Svc.Log.Warning($"Failed to get online user count: {response.StatusCode}");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Error getting online user count: {ex.Message}");
+            return null;
+        }
+    }
+    
     /// <summary>
     /// Checks if a duty is marked as completed.
     /// </summary>

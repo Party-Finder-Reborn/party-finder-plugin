@@ -460,6 +460,18 @@ public class JoinResult
 }
 
 /// <summary>
+/// Result of creating or updating a listing that may have failed content moderation
+/// </summary>
+public class ListingResult
+{
+    public bool Success { get; set; }
+    public PartyListing? Listing { get; set; }
+    public string? ErrorMessage { get; set; }
+    public bool ContentModerationFailed { get; set; }
+    public string? ModerationReason { get; set; }
+}
+
+/// <summary>
 /// Available party statuses
 /// </summary>
 /// <summary>

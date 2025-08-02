@@ -28,6 +28,10 @@ public class MainWindow : Window, IDisposable
     private List<PopularItem> PopularTags;
     private string NewFilterTag;
     
+    // Online users state
+    private int? _onlineUserCount;
+    private DateTime _lastOnlineFetch;
+    
     // Pagination state
     private string? _nextPageUrl;
     private string? _prevPageUrl;
@@ -52,6 +56,7 @@ public class MainWindow : Window, IDisposable
         OpenDetailWindows = new Dictionary<string, BaseListingWindow>();
         PopularTags = new List<PopularItem>();
         NewFilterTag = "";
+        _lastOnlineFetch = DateTime.MinValue;
 
         // Load data on initialization
         _ = LoadUserDataAsync();
@@ -92,6 +97,8 @@ public class MainWindow : Window, IDisposable
             _prevPageUrl = null;
             _totalCount = 0;
             _currentResponse = null;
+            _onlineUserCount = null;
+            _lastOnlineFetch = DateTime.MinValue;
             
             // Reload all data that requires authentication
             await LoadUserDataAsync();
@@ -116,6 +123,9 @@ public class MainWindow : Window, IDisposable
             
 if (response != null)
             {
+                var newOnlineUserCount = await Plugin.ApiService.GetOnlineUserCountAsync();
+                _onlineUserCount = newOnlineUserCount;
+                _lastOnlineFetch = DateTime.Now;
                 _currentResponse = response;
                 PartyListings = response.Results;
                 _nextPageUrl = response.Next;
@@ -348,6 +358,12 @@ if (response != null)
         
         DrawHeader();
         ImGui.Separator();
+        
+        // Online user count display with subtle styling
+        if (_onlineUserCount.HasValue)
+            ImGui.TextColored(new Vector4(1.0f, 0.84f, 0.0f, 1.0f), $"Online users: {_onlineUserCount.Value}"); // Gold color
+        else
+            ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), "Online users: --"); // Gray color
         
         // Main content area
         var contentSize = ImGui.GetContentRegionAvail();

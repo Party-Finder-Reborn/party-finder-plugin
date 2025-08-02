@@ -588,7 +588,7 @@ namespace PartyFinderReborn.Windows
                     updatedListing.CreatorRole = _creatorRole;
                 }
                 
-                PartyListing? result;
+                ListingResult result;
                 if (IsCreateMode)
                 {
                     result = await ApiService.CreateListingAsync(updatedListing);
@@ -598,9 +598,9 @@ namespace PartyFinderReborn.Windows
                     result = await ApiService.UpdateListingAsync(Listing.Id, updatedListing);
                 }
                 
-                if (result != null)
+                if (result.Success && result.Listing != null)
                 {
-                    Listing = result;
+                    Listing = result.Listing;
                     
                     _selectedDuty = ContentFinderService.GetContentFinderCondition(Listing.CfcId);
                     
@@ -620,9 +620,19 @@ Svc.Log.Info($"Successfully {(wasCreateMode ? "created" : "updated")} listing fo
 
                     IsOpen = false;
                 }
+                else if (result.ContentModerationFailed && !string.IsNullOrEmpty(result.ModerationReason))
+                {
+                    // Handle content moderation failure
+                    Plugin.SendModerationMessage(result.ModerationReason);
+                    Svc.Log.Warning($"Content moderation failed for listing: {result.ModerationReason}");
+                }
                 else
                 {
-                    Svc.Log.Error($"Failed to {(IsCreateMode ? "create" : "update")} listing");
+                    Svc.Log.Error($"Failed to {(IsCreateMode ? "create" : "update")} listing: {result.ErrorMessage}");
+                    if (!string.IsNullOrEmpty(result.ErrorMessage))
+                    {
+                        Svc.Chat.PrintError($"[Party Finder Reborn] {result.ErrorMessage}");
+                    }
                 }
             }
             catch (Exception ex)

@@ -366,6 +366,36 @@ public sealed class Plugin : IDalamudPlugin
         // Send to chat
         Svc.Chat.Print(message);
     }
+    
+    /// <summary>
+    /// Send a content moderation message to chat
+    /// </summary>
+    public void SendModerationMessage(string moderationReason)
+    {
+        // Clean up the moderation reason by removing redundant prefixes
+        var cleanedReason = moderationReason;
+        
+        // Remove common prefixes that make the message redundant
+        if (cleanedReason.StartsWith("Content violates community guidelines: "))
+        {
+            cleanedReason = cleanedReason.Substring("Content violates community guidelines: ".Length);
+        }
+        
+        // Capitalize first letter for better presentation
+        if (!string.IsNullOrEmpty(cleanedReason))
+        {
+            cleanedReason = char.ToUpper(cleanedReason[0]) + cleanedReason.Substring(1);
+        }
+        
+        var message = new SeStringBuilder()
+            .AddText("[Party Finder Reborn] ")
+            .AddText("Your listing was rejected: ")
+            .AddText(cleanedReason)
+            .AddText(". Please modify your content and try again.")
+            .BuiltString;
+
+        Svc.Chat.PrintError(message);
+    }
 
     private unsafe void InvitePlayerToParty(string? characterName, string? characterWorld, string? notificationId)
     {
