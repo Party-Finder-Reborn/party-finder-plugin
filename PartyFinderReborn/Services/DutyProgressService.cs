@@ -23,11 +23,12 @@ public class DutyProgressService : IDisposable
     private readonly PartyFinderApiService _apiService;
     private readonly Configuration _configuration;
     
-private readonly SemaphoreSlim _progPointsSemaphore = new(1, 1);
-    private readonly HashSet<uint> _completedDutiesMirror = new();
+    private readonly SemaphoreSlim _progPointsSemaphore = new(1, 1);
+    private readonly HashSet<uint> _completedDutiesMirror = new(); // Stores CFC IDs
     private readonly Dictionary<uint, HashSet<uint>> _seenProgPointsMirror = new();
     private readonly Dictionary<uint, HashSet<uint>> _allowedProgPointsCache = new();
     private readonly Dictionary<uint, Dictionary<uint, string>> _progPointFriendlyNamesCache = new();
+    private readonly Dictionary<uint, uint> _contentIdToCfcIdMap = new(); // Maps Content ID to CFC ID
     private uint _activeCfcId = 0;
     private HashSet<uint>? _activeAllowedProgPoints = null;
     private Dictionary<uint, string>? _activeProgPointFriendlyNames = null;
@@ -94,7 +95,13 @@ private readonly SemaphoreSlim _progPointsSemaphore = new(1, 1);
         try
         {
             var allDuties = _contentFinderService.GetAllDuties();
-            var completedDutiesFromGame = new List<uint>();
+            var completedCfcIdsFromGame = new List<uint>();
+
+            // Populate mapping from Content ID to CFC ID
+            foreach (var duty in allDuties)
+            {
+                _contentIdToCfcIdMap[duty.Content.RowId] = duty.RowId;
+            }
 
             // Check each duty against the game state using UIState.IsInstanceContentCompleted
             foreach (var duty in allDuties)
@@ -103,7 +110,10 @@ private readonly SemaphoreSlim _progPointsSemaphore = new(1, 1);
                 {
                     if (UIState.IsInstanceContentCompleted(duty.Content.RowId))
                     {
-                        completedDutiesFromGame.Add(duty.Content.RowId);
+                        if (_contentIdToCfcIdMap.TryGetValue(duty.Content.RowId, out var cfcId))
+                        {
+                            completedCfcIdsFromGame.Add(cfcId);
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -112,19 +122,19 @@ private readonly SemaphoreSlim _progPointsSemaphore = new(1, 1);
                 }
             }
 
-            if (completedDutiesFromGame.Count > 0)
+            if (completedCfcIdsFromGame.Count > 0)
             {
                 var successCount = 0;
                 
-                foreach (var dutyId in completedDutiesFromGame)
+                foreach (var cfcId in completedCfcIdsFromGame)
                 {
                     // Only sync if not already in our local mirror.
-                    if (_completedDutiesMirror.Contains(dutyId)) continue;
+                    if (_completedDutiesMirror.Contains(cfcId)) continue;
 
-                    var success = await _apiService.MarkDutyCompletedAsync(dutyId);
+                    var success = await _apiService.MarkDutyCompletedAsync(cfcId);
                     if (success)
                     {
-                        _completedDutiesMirror.Add(dutyId);
+                        _completedDutiesMirror.Add(cfcId);
                         successCount++;
                     }
                 }
@@ -468,7 +478,12 @@ private readonly SemaphoreSlim _progPointsSemaphore = new(1, 1);
         try
         {
             var allDuties = _contentFinderService.GetAllDuties();
-            var completedDutiesFromGame = new List<uint>();
+
+            // Populate mapping from Content ID to CFC ID
+            foreach (var duty in allDuties)
+            {
+                _contentIdToCfcIdMap[duty.Content.RowId] = duty.RowId;
+            }
 
             // Check each duty against the game state using UIState.IsInstanceContentCompleted
             foreach (var duty in allDuties)
@@ -477,15 +492,18 @@ private readonly SemaphoreSlim _progPointsSemaphore = new(1, 1);
                 {
                     if (UIState.IsInstanceContentCompleted(duty.Content.RowId))
                     {
-                        completedDutiesFromGame.Add(duty.Content.RowId);
-                        _completedDutiesMirror.Add(duty.Content.RowId);
+                        // Map Content ID to CFC ID before adding to mirror
+                        if (_contentIdToCfcIdMap.TryGetValue(duty.Content.RowId, out var cfcId))
+                        {
+                            _completedDutiesMirror.Add(cfcId);
+                        }
                     }
                 }
                 catch (Exception ex)
                 {
+                    // Silently skip duties that can't be checked
                 }
             }
-
         }
         catch (Exception ex)
         {
