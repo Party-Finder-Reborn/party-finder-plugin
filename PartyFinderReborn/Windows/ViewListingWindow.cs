@@ -434,118 +434,86 @@ public override void Draw()
         private void DrawActionButtonsFooter()
         {
             ImGui.Separator();
-            var footerHeight = ImGui.GetFrameHeightWithSpacing() + ImGui.GetStyle().WindowPadding.Y;
-            ImGui.SetCursorPosY(ImGui.GetWindowSize().Y - footerHeight);
-            
             ImGui.BeginChild("Footer", new Vector2(0, 0), false, ImGuiWindowFlags.NoScrollbar);
             {
-                // Calculate button dimensions and spacing
-                var contentWidth = ImGui.GetContentRegionMax().X;
-                var closeButtonWidth = 60f;
-                var editButtonWidth = 60f;
-                var refreshButtonWidth = 80f;
-                var buttonSpacing = ImGui.GetStyle().ItemSpacing.X;
-                
-                // Always render Close + Refresh first (anchored right) - these are always visible
-                // Close button (rightmost)
-                ImGui.SameLine(contentWidth - closeButtonWidth);
-                if (ImGui.Button("Close", new Vector2(closeButtonWidth, 0)))
+                // Always visible buttons - positioned on the left
+                double refreshWait = 0;
+                var refreshDisabled = IsRefreshing || !Plugin.DebounceService.CanExecute(ApiOperationType.Read, out refreshWait);
+                if (refreshDisabled && !IsRefreshing)
+                {
+                    refreshWait = Plugin.DebounceService.SecondsRemaining(ApiOperationType.Read);
+                }
+
+                ImGui.BeginDisabled(refreshDisabled);
+                if (ImGui.Button(IsRefreshing ? "Refreshing..." : "Refresh", new Vector2(80, 0)))
+                {
+                    _ = RefreshListingAsync();
+                }
+                ImGui.EndDisabled();
+
+                if (refreshDisabled && !IsRefreshing && ImGui.IsItemHovered())
+                {
+                    ImGui.SetTooltip($"Please wait {refreshWait:F1}s");
+                }
+
+                ImGui.SameLine();
+                if (ImGui.Button("Close", new Vector2(60, 0)))
                 {
                     IsOpen = false;
                 }
-                
-                // Edit button (if owner, to the left of Close)
+
+                // Owner-specific buttons
                 if (Listing.IsOwner)
                 {
-                    ImGui.SameLine(contentWidth - closeButtonWidth - buttonSpacing - editButtonWidth);
-                    if (ImGui.Button("Edit", new Vector2(editButtonWidth, 0)))
+                    ImGui.SameLine();
+                    if (ImGui.Button("Edit", new Vector2(60, 0)))
                     {
                         var editWindow = new CreateEditListingWindow(Plugin, Listing, false);
                         Plugin.WindowSystem.AddWindow(editWindow);
                         editWindow.IsOpen = true;
                     }
+
+                    ImGui.SameLine();
+                    if (ImGui.Button("Close Listing", new Vector2(100, 0)))
+                    {
+                        _ = CloseListingAsync();
+                    }
                 }
-                
-                // Refresh button (to the left of Edit/Close) - always visible
-                var refreshButtonStart = Listing.IsOwner 
-                    ? contentWidth - closeButtonWidth - buttonSpacing - editButtonWidth - buttonSpacing - refreshButtonWidth
-                    : contentWidth - closeButtonWidth - buttonSpacing - refreshButtonWidth;
+                // Non-owner join in-game party functionality
+                else
+                {
+                    var userDatacenter = Plugin.WorldService.GetCurrentPlayerCurrentDataCenter();
+                    var creatorDatacenter = Listing.Datacenter;
+                    var inSameDatacenter = string.Equals(userDatacenter, creatorDatacenter, StringComparison.OrdinalIgnoreCase);
                     
-                ImGui.SameLine(refreshButtonStart);
-                double refreshWait = 0;
-                var refreshDisabled = IsRefreshing || !Plugin.DebounceService.CanExecute(ApiOperationType.Read, out refreshWait);
-                if (refreshDisabled && !IsRefreshing)
-                {
-                    // Update timer each frame for smooth countdown
-                    refreshWait = Plugin.DebounceService.SecondsRemaining(ApiOperationType.Read);
-                }
-                
-                ImGui.BeginDisabled(refreshDisabled);
-                if (ImGui.Button(IsRefreshing ? "Refreshing..." : "Refresh", new Vector2(refreshButtonWidth, 0))) { _ = RefreshListingAsync(); }
-                ImGui.EndDisabled();
-                
-                if (refreshDisabled && !IsRefreshing && ImGui.IsItemHovered())
-                {
-                    ImGui.SetTooltip($"Please wait {refreshWait:F1}s");
-                }
-                
-                // Now draw Join/Leave/CloseListing block on left side with party conditionals
-                // Reset cursor to start of line for left-side buttons
-                ImGui.SameLine(0); // Move to leftmost position
-                
-                if (Listing.IsActive)
-                {
-                    if (Listing.IsOwner)
+                    var isInParty = false;
+                    Svc.Framework.RunOnFrameworkThread(() =>
                     {
-                        if (ImGui.Button("Close Listing", new Vector2(100, 0))) { _ = CloseListingAsync(); }
+                        isInParty = Svc.Party.Length > 1;
+                    });
+
+                    var canJoinInGame = inSameDatacenter && !isInParty;
+
+                    ImGui.SameLine();
+                    ImGui.BeginDisabled(!canJoinInGame);
+                    if (ImGui.Button("Join In-Game Party", new Vector2(150, 0)) && canJoinInGame)
+                    {
+                        SendInGamePartyJoinRequest();
                     }
-                    else if (Listing.HasJoined)
+                    ImGui.EndDisabled();
+
+                    // Warning message if requirements not met
+                    if (!canJoinInGame)
                     {
-                        double leaveWait = 0;
-                        var leaveDisabled = IsLeaving || !Plugin.DebounceService.CanExecute(ApiOperationType.QuickAction, out leaveWait);
-                        if (leaveDisabled && !IsLeaving)
+                        ImGui.NewLine();
+                        if (!inSameDatacenter)
                         {
-                            // Update timer each frame for smooth countdown
-                            leaveWait = Plugin.DebounceService.SecondsRemaining(ApiOperationType.QuickAction);
+                            ImGui.TextColored(ImGuiColors.DalamudRed, $"Must be in datacenter {creatorDatacenter} to join in-game party");
                         }
-                        
-                        ImGui.BeginDisabled(leaveDisabled);
-                        if (ImGui.Button(IsLeaving ? "Leaving..." : "Leave Party", new Vector2(100, 0))) { _ = LeavePartyAsync(); }
-                        ImGui.EndDisabled();
-                        
-                        if (leaveDisabled && !IsLeaving && ImGui.IsItemHovered())
+                        else if (isInParty)
                         {
-                            ImGui.SetTooltip($"Please wait {leaveWait:F1}s");
+                            ImGui.TextColored(ImGuiColors.DalamudRed, "Already in a party - leave current party first");
                         }
-                        
-                        // Add Join In-Game Party button when user has joined the service party
-                        ImGui.SameLine();
-                        DrawJoinInGamePartyButton();
-                    }
-                    else if (Listing.CurrentSize < Listing.MaxSize)
-                    {
-                        double joinWait = 0;
-                        var joinDisabled = IsJoining || !Plugin.DebounceService.CanExecute(ApiOperationType.QuickAction, out joinWait);
-                        if (joinDisabled && !IsJoining)
-                        {
-                            // Update timer each frame for smooth countdown
-                            joinWait = Plugin.DebounceService.SecondsRemaining(ApiOperationType.QuickAction);
-                        }
-                        
-                        ImGui.BeginDisabled(joinDisabled);
-                        if (ImGui.Button(IsJoining ? "Joining..." : "Join Party", new Vector2(100, 0))) { ShowJobSelectionPopup(JoinPartyWithJob); }
-                        ImGui.EndDisabled();
-                        
-                        if (joinDisabled && !IsJoining && ImGui.IsItemHovered())
-                        {
-                            ImGui.SetTooltip($"Please wait {joinWait:F1}s");
-                        }
-                    }
-                    else
-                    {
-                        ImGui.BeginDisabled(true);
-                        ImGui.Button("Party Full", new Vector2(100, 0));
-                        ImGui.EndDisabled();
                     }
                 }
             }
