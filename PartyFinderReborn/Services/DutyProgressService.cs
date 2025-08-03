@@ -51,11 +51,14 @@ public class DutyProgressService : IDisposable
     {
         try
         {
-            // Initial population of the local mirror
-            await RefreshLocalMirrorAsync();
+            // Clear local mirrors to ensure fresh start
+            _completedDutiesMirror.Clear();
+            _seenProgPointsMirror.Clear();
             
-            // Run initial sync from game state for redundancy and testing
-            await SyncDutiesOnLoginAsync();
+            // Run FORCED complete re-sync to fix any mapping issues from previous versions
+            // This ensures the server gets the correct CFC IDs for all completed duties
+            Svc.Log.Info("[DutyProgressService] Running forced complete re-sync at startup to fix duty completion tracking");
+            await ForceCompleteSyncAsync();
             
         }
         catch (Exception ex)
@@ -87,6 +90,85 @@ public class DutyProgressService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Forces a complete re-sync of all completed duties, ignoring the local mirror.
+    /// Use this when the mapping logic has changed and we need to update the server with corrected IDs.
+    /// </summary>
+    public async Task ForceCompleteSyncAsync()
+    {
+        try
+        {
+            Svc.Log.Info("[DutyProgressService] Starting FORCED complete re-sync of all completed duties");
+            
+            var allDuties = _contentFinderService.GetAllDuties();
+            var completedCfcIdsFromGame = new List<uint>();
+
+            // Populate mapping from Content ID to CFC ID - check for both real and custom duties
+            foreach (var duty in allDuties)
+            {
+                if (duty is RealDutyInfo realDuty)
+                {
+                    var contentId = realDuty._contentFinderCondition.Content.RowId;
+                    var cfcId = duty.RowId;
+                    _contentIdToCfcIdMap[contentId] = cfcId;
+                }
+                else if (duty is CustomDutyInfo)
+                {
+                    if (!_contentIdToCfcIdMap.ContainsKey(duty.RowId))
+                    {
+                        _contentIdToCfcIdMap[duty.RowId] = duty.RowId;
+                    }
+                }
+            }
+
+            // Check each duty against the game state using UIState.IsInstanceContentCompleted
+            foreach (var duty in allDuties)
+            {
+                try
+                {
+                    if (duty is RealDutyInfo realDuty)
+                    {
+                        if (UIState.IsInstanceContentCompleted(realDuty._contentFinderCondition.Content.RowId))
+                        {
+                            if (_contentIdToCfcIdMap.TryGetValue(realDuty._contentFinderCondition.Content.RowId, out var cfcId))
+                            {
+                                completedCfcIdsFromGame.Add(cfcId);
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Svc.Log.Warning($"Failed to check completion for duty {duty.RowId}: {ex.Message}");
+                }
+            }
+
+            Svc.Log.Info($"[DutyProgressService] Found {completedCfcIdsFromGame.Count} completed duties in game state");
+            
+            if (completedCfcIdsFromGame.Count > 0)
+            {
+                var successCount = 0;
+                
+                // FORCE sync ALL completed duties, ignoring local mirror
+                foreach (var cfcId in completedCfcIdsFromGame)
+                {
+                    var success = await _apiService.MarkDutyCompletedAsync(cfcId);
+                    if (success)
+                    {
+                        _completedDutiesMirror.Add(cfcId);
+                        successCount++;
+                    }
+                }
+                
+                Svc.Log.Info($"[DutyProgressService] FORCED re-sync completed: {successCount}/{completedCfcIdsFromGame.Count} duties synced to server");
+            }
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"An error occurred during FORCED duty synchronization: {ex.Message}");
+        }
+    }
+    
     /// <summary>
     /// Synchronizes completed duties from the game to the server on login.
     /// </summary>
