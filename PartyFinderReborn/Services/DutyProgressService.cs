@@ -94,17 +94,31 @@ public class DutyProgressService : IDisposable
     {
         try
         {
-            var allDuties = _contentFinderService.GetAllDuties();
+var allDuties = _contentFinderService.GetAllDuties();
             var completedCfcIdsFromGame = new List<uint>();
 
-            // Populate mapping from Content ID to CFC ID - only for real duties
+            // Populate mapping from Content ID to CFC ID - check for both real and custom duties
+            Svc.Log.Info($"[DutyProgressService] Building Content ID to CFC ID mapping for {allDuties.Count()} duties");
             foreach (var duty in allDuties)
             {
                 if (duty is RealDutyInfo realDuty)
                 {
-                    _contentIdToCfcIdMap[realDuty._contentFinderCondition.RowId] = duty.RowId;
+                    var contentId = realDuty._contentFinderCondition.Content.RowId;
+                    var cfcId = duty.RowId;
+                    _contentIdToCfcIdMap[contentId] = cfcId;
+                    Svc.Log.Debug($"[DutyProgressService] Mapped Content ID {contentId} -> CFC ID {cfcId} for duty '{duty.NameText}'");
+                }
+                else if (duty is CustomDutyInfo)
+                {
+                    // Custom duties use their own ID for both content and CFC
+                    if (!_contentIdToCfcIdMap.ContainsKey(duty.RowId))
+                    {
+                        _contentIdToCfcIdMap[duty.RowId] = duty.RowId;
+                        Svc.Log.Debug($"[DutyProgressService] Mapped custom duty ID {duty.RowId} -> {duty.RowId} for '{duty.NameText}'");
+                    }
                 }
             }
+            Svc.Log.Info($"[DutyProgressService] Built mapping with {_contentIdToCfcIdMap.Count} entries");
 
             // Check each duty against the game state using UIState.IsInstanceContentCompleted
             // Skip custom duties as they don't have ContentFinderCondition data
@@ -493,7 +507,7 @@ public class DutyProgressService : IDisposable
             {
                 if (duty is RealDutyInfo realDuty)
                 {
-                    _contentIdToCfcIdMap[realDuty._contentFinderCondition.RowId] = duty.RowId;
+                    _contentIdToCfcIdMap[realDuty._contentFinderCondition.Content.RowId] = duty.RowId;
                 }
             }
 
