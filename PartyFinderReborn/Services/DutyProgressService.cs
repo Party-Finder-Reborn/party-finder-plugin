@@ -115,9 +115,9 @@ public class DutyProgressService : IDisposable
                     // Only process real duties - skip custom duties (Hunt, FATE, Role Playing)
                     if (duty is RealDutyInfo realDuty)
                     {
-                        if (UIState.IsInstanceContentCompleted(realDuty._contentFinderCondition.RowId))
+                        if (UIState.IsInstanceContentCompleted(realDuty._contentFinderCondition.Content.RowId))
                         {
-                            if (_contentIdToCfcIdMap.TryGetValue(realDuty._contentFinderCondition.RowId, out var cfcId))
+                            if (_contentIdToCfcIdMap.TryGetValue(realDuty._contentFinderCondition.Content.RowId, out var cfcId))
                             {
                                 completedCfcIdsFromGame.Add(cfcId);
                             }
