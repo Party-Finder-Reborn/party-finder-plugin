@@ -39,7 +39,7 @@ namespace PartyFinderReborn.Windows
         private string _editCreatorJob = string.Empty; // Creator job for new listings
 
         // Duty selection state
-        private ContentFinderCondition? _selectedDuty;
+        private IDutyInfo? _selectedDuty;
         private bool _hasLoadedProgPointsOnShow = false;
         
         public CreateEditListingWindow(Plugin plugin, PartyListing listing, bool createMode = false) : base(plugin, listing, $"{(createMode ? "Create" : "Edit")} Listing##edit_{listing.Id}")
@@ -97,7 +97,7 @@ namespace PartyFinderReborn.Windows
             _newTag = string.Empty;
             _newStrategy = string.Empty;
 
-            _selectedDuty = ContentFinderService.GetContentFinderCondition(_editCfcId);
+            _selectedDuty = ContentFinderService.GetAllDuties().FirstOrDefault(duty => duty.RowId == _editCfcId);
         }
 
         public override void Draw()
@@ -467,9 +467,9 @@ namespace PartyFinderReborn.Windows
         
         private void DrawDutySelector()
         {
-            var currentDutyName = _selectedDuty.HasValue && !_selectedDuty.Value.Name.IsEmpty ? _selectedDuty.Value.Name.ExtractText() : "No duty selected";
-            var currentDutyType = _selectedDuty.HasValue ? ContentFinderService.GetContentTypeName(_selectedDuty.Value) : "";
-            var displayText = _selectedDuty.HasValue ? $"{currentDutyName} ({currentDutyType})" : "Click to select duty...";
+            var displayText = _selectedDuty != null 
+                ? $"{_selectedDuty.NameText} ({ContentFinderService.GetContentTypeName(_selectedDuty)})" 
+                : "Click to select duty...";
             
             if (ImGui.Selectable(displayText, false, ImGuiSelectableFlags.None, new Vector2(0, 25)))
             {
@@ -481,15 +481,15 @@ namespace PartyFinderReborn.Windows
                 ImGui.SetTooltip("Click to change duty");
             }
 
-            if (_selectedDuty.HasValue)
+            if (_selectedDuty != null)
             {
-                ImGui.TextDisabled($"ID: {_selectedDuty.Value.RowId}, Level: {_selectedDuty.Value.ClassJobLevelRequired}, Item Level: {_selectedDuty.Value.ItemLevelRequired}");
+                ImGui.TextDisabled($"ID: {_selectedDuty.RowId}, Level: {_selectedDuty.ClassJobLevelRequired}, Item Level: {_selectedDuty.ItemLevelRequired}");
             }
 
             ImGui.Separator();
         }
 
-        private void OnDutySelected(ContentFinderCondition? selectedDuty)
+        private void OnDutySelected(IDutyInfo? selectedDuty)
         {
             _selectedDuty = selectedDuty;
             _editCfcId = selectedDuty?.RowId ?? 0;
@@ -501,11 +501,11 @@ namespace PartyFinderReborn.Windows
             }
         }
         
-        private void OnRequiredClearSelected(ContentFinderCondition? selectedDuty)
+        private void OnRequiredClearSelected(IDutyInfo? selectedDuty)
         {
-            if (selectedDuty.HasValue && !_editRequiredClears.Contains(selectedDuty.Value.RowId))
+            if (selectedDuty != null && !_editRequiredClears.Contains(selectedDuty.RowId))
             {
-                _editRequiredClears.Add(selectedDuty.Value.RowId);
+                _editRequiredClears.Add(selectedDuty.RowId);
             }
         }
         
@@ -611,7 +611,7 @@ namespace PartyFinderReborn.Windows
                 {
                     Listing = result.Listing;
                     
-                    _selectedDuty = ContentFinderService.GetContentFinderCondition(Listing.CfcId);
+                    _selectedDuty = ContentFinderService.GetAllDuties().FirstOrDefault(duty => duty.RowId == Listing.CfcId);
                     
                     var dutyName = ContentFinderService.GetDutyDisplayName(Listing.CfcId);
                     WindowName = $"{dutyName}##detail_{Listing.Id}";

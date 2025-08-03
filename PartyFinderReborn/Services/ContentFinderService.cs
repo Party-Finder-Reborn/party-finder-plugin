@@ -4,6 +4,7 @@ using System.Linq;
 using ECommons.DalamudServices;
 using Lumina.Excel;
 using Lumina.Excel.Sheets;
+using PartyFinderReborn.Models;
 
 namespace PartyFinderReborn.Services;
 
@@ -12,21 +13,23 @@ namespace PartyFinderReborn.Services;
 /// </summary>
 public class ContentFinderService : IDisposable
 {
-    private Dictionary<uint, ContentFinderCondition>? _contentFinderCache;
-    private List<ContentFinderCondition>? _sortedDuties;
-    private Dictionary<ushort, uint> _territoryToCfc;
+    private List<IDutyInfo> _list;
+    private Dictionary<uint, IDutyInfo> _idLookup;
+    private Dictionary<ushort, uint> _territoryToId;
     
     public ContentFinderService()
     {
-        _territoryToCfc = new Dictionary<ushort, uint>();
+        _list = new List<IDutyInfo>();
+        _idLookup = new Dictionary<uint, IDutyInfo>();
+        _territoryToId = new Dictionary<ushort, uint>();
         InitializeCache();
     }
     
     public void Dispose()
     {
-        _contentFinderCache?.Clear();
-        _sortedDuties?.Clear();
-        _territoryToCfc.Clear();
+        _list.Clear();
+        _idLookup.Clear();
+        _territoryToId.Clear();
     }
     
     private void InitializeCache()
@@ -35,31 +38,45 @@ public class ContentFinderService : IDisposable
         {
             var sheet = Svc.Data.GetExcelSheet<ContentFinderCondition>();
 
-            _contentFinderCache = new Dictionary<uint, ContentFinderCondition>();
-            var duties = new List<ContentFinderCondition>();
-            _territoryToCfc.Clear();
-            
+            _list.Clear();
+            _idLookup.Clear();
+            _territoryToId.Clear();
+
             foreach (var cfc in sheet)
             {
                 if (cfc.RowId == 0) continue;
-                
+
                 // Skip invalid or empty entries
                 if (cfc.Name.IsEmpty || string.IsNullOrEmpty(cfc.Name.ExtractText())) continue;
-                
-                _contentFinderCache[cfc.RowId] = cfc;
-                duties.Add(cfc);
-                
-                // Build territory to CFC mapping
+
+                var realDutyInfo = new RealDutyInfo(cfc);
+                _list.Add(realDutyInfo);
+                _idLookup[cfc.RowId] = realDutyInfo;
+
+                // Build territory to ID mapping
                 var territoryType = (ushort)cfc.TerritoryType.RowId;
-                if (territoryType != 0 && !_territoryToCfc.ContainsKey(territoryType))
+                if (territoryType != 0 && !_territoryToId.ContainsKey(territoryType))
                 {
                     // Store the first matching RowId for each territory
-                    _territoryToCfc[territoryType] = cfc.RowId;
+                    _territoryToId[territoryType] = cfc.RowId;
                 }
             }
+
+            // Add custom duties
+            var huntDuty = new CustomDutyInfo { RowId = 9999, NameText = "Hunt", ContentTypeId = 0, ClassJobLevelRequired = 1, ItemLevelRequired = 0 };
+            var fateDuty = new CustomDutyInfo { RowId = 9998, NameText = "FATE", ContentTypeId = 0, ClassJobLevelRequired = 1, ItemLevelRequired = 0 };
+            var rolePlayingDuty = new CustomDutyInfo { RowId = 9997, NameText = "Role Playing", ContentTypeId = 0, ClassJobLevelRequired = 1, ItemLevelRequired = 0 };
             
-            // Sort by name for better user experience
-            _sortedDuties = duties.OrderBy(d => d.Name.ExtractText()).ToList();
+            _list.Add(huntDuty);
+            _list.Add(fateDuty);
+            _list.Add(rolePlayingDuty);
+            
+            _idLookup[9999] = huntDuty;
+            _idLookup[9998] = fateDuty;
+            _idLookup[9997] = rolePlayingDuty;
+
+            // Sort the list by NameText
+            _list = _list.OrderBy(d => d.NameText).ToList();
             
         }
         catch (Exception ex)
@@ -73,58 +90,109 @@ public class ContentFinderService : IDisposable
     /// </summary>
     public ContentFinderCondition? GetContentFinderCondition(uint cfcId)
     {
-        return _contentFinderCache?.GetValueOrDefault(cfcId);
+        var dutyInfo = _idLookup?.GetValueOrDefault(cfcId);
+        return dutyInfo is RealDutyInfo realDuty ? realDuty._contentFinderCondition : null;
+    }
+    
+    /// <summary>
+    /// Helper method for external code that expects real ContentFinderCondition objects.
+    /// Returns ContentFinderCondition for real duties, null for custom duties.
+    /// Use this when external logic relies on ContentType/territory data.
+    /// </summary>
+    /// <param name="id">Duty ID</param>
+    /// <returns>ContentFinderCondition if duty is real, null if custom</returns>
+    public ContentFinderCondition? GetRealDuty(uint id)
+    {
+        var dutyInfo = _idLookup?.GetValueOrDefault(id);
+        return dutyInfo is RealDutyInfo realDuty ? realDuty._contentFinderCondition : null;
     }
     
     /// <summary>
     /// Get all duties for dropdown/search purposes
     /// </summary>
-    public List<ContentFinderCondition> GetAllDuties()
+    public List<IDutyInfo> GetAllDuties()
     {
-        return _sortedDuties ?? new List<ContentFinderCondition>();
+        return _list ?? new List<IDutyInfo>();
+    }
+
+    // Legacy overload
+    public List<ContentFinderCondition> GetAllDutiesLegacy()
+    {
+        return _list?.Where(d => d is RealDutyInfo).Cast<RealDutyInfo>().Select(d => d._contentFinderCondition).ToList() ?? new List<ContentFinderCondition>();
     }
     
     /// <summary>
     /// Search duties by name
     /// </summary>
-    public List<ContentFinderCondition> SearchDuties(string searchTerm)
+    public List<IDutyInfo> SearchDuties(string searchTerm)
     {
-        if (_sortedDuties == null || string.IsNullOrWhiteSpace(searchTerm))
+        if (_list == null || string.IsNullOrWhiteSpace(searchTerm))
             return GetAllDuties();
         
         var lowerSearch = searchTerm.ToLowerInvariant();
-        return _sortedDuties
-            .Where(d => (!d.Name.IsEmpty && d.Name.ExtractText().ToLowerInvariant().Contains(lowerSearch)) || 
-                       GetContentTypeName(d).ToLowerInvariant().Contains(lowerSearch))
+        return _list
+            .Where(d => d.NameText.ToLowerInvariant().Contains(lowerSearch))
             .ToList();
+    }
+
+    // Legacy overload
+    public List<ContentFinderCondition> SearchDutiesLegacy(string searchTerm)
+    {
+        if (_list == null || string.IsNullOrWhiteSpace(searchTerm))
+            return GetAllDutiesLegacy();
+        
+        var lowerSearch = searchTerm.ToLowerInvariant();
+        return _list
+            .Where(d => d is RealDutyInfo && ((RealDutyInfo)d)._contentFinderCondition.Name.ExtractText().ToLowerInvariant().Contains(lowerSearch))
+            .Cast<RealDutyInfo>().Select(d => d._contentFinderCondition).ToList();
     }
     
     /// <summary>
     /// Get duties filtered by content type
     /// </summary>
-    public List<ContentFinderCondition> GetDutiesByContentType(string contentType)
+    public List<IDutyInfo> GetDutiesByContentType(string contentType)
     {
-        if (_sortedDuties == null)
-            return new List<ContentFinderCondition>();
+        if (_list == null)
+            return new List<IDutyInfo>();
         
-        return _sortedDuties
+        return _list
             .Where(d => string.Equals(GetContentTypeName(d), contentType, StringComparison.OrdinalIgnoreCase))
             .ToList();
+    }
+    
+    // Legacy overload
+    public List<ContentFinderCondition> GetDutiesByContentTypeLegacy(string contentType)
+    {
+        if (_list == null)
+            return new List<ContentFinderCondition>();
+        
+        return _list
+            .Where(d => d is RealDutyInfo && string.Equals(GetContentTypeName(((RealDutyInfo)d)._contentFinderCondition), contentType, StringComparison.OrdinalIgnoreCase))
+            .Cast<RealDutyInfo>().Select(d => d._contentFinderCondition).ToList();
     }
     
     /// <summary>
     /// Get duties suitable for high-end content (raids, extremes, etc.)
     /// </summary>
-    public List<ContentFinderCondition> GetHighEndDuties()
+    public List<IDutyInfo> GetHighEndDuties()
     {
-        if (_sortedDuties == null)
+        if (_list == null)
+            return new List<IDutyInfo>();
+        
+        return _list
+            .Where(d => d.HighEndDuty || GetContentTypeName(d).Contains("Savage") || GetContentTypeName(d).Contains("Ultimate"))
+            .ToList();
+    }
+    
+    // Legacy overload
+    public List<ContentFinderCondition> GetHighEndDutiesLegacy()
+    {
+        if (_list == null)
             return new List<ContentFinderCondition>();
         
-        return _sortedDuties
-            .Where(d => d.HighEndDuty ||
-                       GetContentTypeName(d).Contains("Savage") ||
-                       GetContentTypeName(d).Contains("Ultimate"))
-            .ToList();
+        return _list
+            .Where(d => d is RealDutyInfo && (d.HighEndDuty || GetContentTypeName(((RealDutyInfo)d)._contentFinderCondition).Contains("Savage") || GetContentTypeName(((RealDutyInfo)d)._contentFinderCondition).Contains("Ultimate")))
+            .Cast<RealDutyInfo>().Select(d => d._contentFinderCondition).ToList();
     }
     
     /// <summary>
@@ -132,14 +200,11 @@ public class ContentFinderService : IDisposable
     /// </summary>
     public string GetDutyDisplayName(uint cfcId)
     {
-        var duty = GetContentFinderCondition(cfcId);
-        if (duty == null)
-            return $"Unknown Duty (#{cfcId})";
-        
-        if (duty.Value.Name.IsEmpty)
+        var dutyInfo = _idLookup?.GetValueOrDefault(cfcId);
+        if (dutyInfo == null)
             return $"Unknown Duty (#{cfcId})";
             
-        return duty.Value.Name.ExtractText();
+        return dutyInfo.NameText;
     }
     
     /// <summary>
@@ -147,15 +212,12 @@ public class ContentFinderService : IDisposable
     /// </summary>
     public string GetDutyDetailedDisplayName(uint cfcId)
     {
-        var duty = GetContentFinderCondition(cfcId);
-        if (duty == null)
-            return $"Unknown Duty (#{cfcId})";
-        
-        if (duty.Value.Name.IsEmpty)
+        var dutyInfo = _idLookup?.GetValueOrDefault(cfcId);
+        if (dutyInfo == null)
             return $"Unknown Duty (#{cfcId})";
             
-        var contentType = GetContentTypeName(duty.Value);
-        return $"{duty.Value.Name.ExtractText()} ({contentType}) - Lv.{duty.Value.ClassJobLevelRequired}, ilvl {duty.Value.ItemLevelRequired}";
+        var contentType = GetContentTypeName(dutyInfo);
+        return $"{dutyInfo.NameText} ({contentType}) - Lv.{dutyInfo.ClassJobLevelRequired}, ilvl {dutyInfo.ItemLevelRequired}";
     }
     
     /// <summary>
@@ -175,7 +237,7 @@ public class ContentFinderService : IDisposable
     /// </summary>
     public bool IsValidDuty(uint cfcId)
     {
-        return _contentFinderCache?.ContainsKey(cfcId) ?? false;
+        return _idLookup?.ContainsKey(cfcId) ?? false;
     }
     
     /// <summary>
@@ -196,14 +258,28 @@ public class ContentFinderService : IDisposable
     }
     
     /// <summary>
+    /// Get the content type name for a duty info
+    /// </summary>
+    public string GetContentTypeName(IDutyInfo duty)
+    {
+        if (duty is RealDutyInfo realDuty)
+        {
+            return GetContentTypeName(realDuty._contentFinderCondition);
+        }
+        
+        // For custom duties
+        return duty.ContentTypeId == 0 ? "Unspecified" : "Unknown";
+    }
+    
+    /// <summary>
     /// Get the first valid CfcId for use as a default
     /// </summary>
     public uint GetFirstValidCfcId()
     {
-        if (_sortedDuties == null || _sortedDuties.Count == 0)
+        if (_list == null || _list.Count == 0)
             return 1; // Fallback to 1 if no duties are loaded
             
-        return _sortedDuties.First().RowId;
+        return _list.First().RowId;
     }
     
     /// <summary>
@@ -211,11 +287,12 @@ public class ContentFinderService : IDisposable
     /// </summary>
     public List<string> GetContentTypes()
     {
-        if (_sortedDuties == null)
+        if (_list == null)
             return new List<string>();
         
-        return _sortedDuties
-            .Select(GetContentTypeName)
+        return _list
+            .OfType<RealDutyInfo>()
+            .Select(d => GetContentTypeName(d._contentFinderCondition))
             .Where(ct => !string.IsNullOrEmpty(ct) && ct != "Unknown")
             .Distinct()
             .OrderBy(ct => ct)
@@ -231,7 +308,7 @@ public class ContentFinderService : IDisposable
     {
         try
         {
-            if (_territoryToCfc.TryGetValue(territory, out var cfcId))
+            if (_territoryToId.TryGetValue(territory, out var cfcId))
             {
                 return cfcId;
             }

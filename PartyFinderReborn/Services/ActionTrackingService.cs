@@ -163,9 +163,15 @@ public class ActionTrackingService : IDisposable
             var currentCfcId = _contentFinderService.GetCfcIdByTerritory(territoryType);
             
             // Load allowed progression points when entering a duty
+            // Only load for real duties - custom duties don't have territory mappings
             if (currentCfcId.HasValue)
             {
-                _ = Task.Run(async () => await _dutyProgressService.LoadAndCacheAllowedProgPointsAsync(currentCfcId.Value));
+                // Verify this is a real duty before loading prog points
+                var realDuty = _contentFinderService.GetRealDuty(currentCfcId.Value);
+                if (realDuty != null)
+                {
+                    _ = Task.Run(async () => await _dutyProgressService.LoadAndCacheAllowedProgPointsAsync(currentCfcId.Value));
+                }
             }
             
             // Check if we should reset the cache on instance leave

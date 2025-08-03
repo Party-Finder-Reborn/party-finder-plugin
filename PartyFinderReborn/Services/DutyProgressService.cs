@@ -97,28 +97,37 @@ public class DutyProgressService : IDisposable
             var allDuties = _contentFinderService.GetAllDuties();
             var completedCfcIdsFromGame = new List<uint>();
 
-            // Populate mapping from Content ID to CFC ID
+            // Populate mapping from Content ID to CFC ID - only for real duties
             foreach (var duty in allDuties)
             {
-                _contentIdToCfcIdMap[duty.Content.RowId] = duty.RowId;
+                if (duty is RealDutyInfo realDuty)
+                {
+                    _contentIdToCfcIdMap[realDuty._contentFinderCondition.RowId] = duty.RowId;
+                }
             }
 
             // Check each duty against the game state using UIState.IsInstanceContentCompleted
+            // Skip custom duties as they don't have ContentFinderCondition data
             foreach (var duty in allDuties)
             {
                 try
                 {
-                    if (UIState.IsInstanceContentCompleted(duty.Content.RowId))
+                    // Only process real duties - skip custom duties (Hunt, FATE, Role Playing)
+                    if (duty is RealDutyInfo realDuty)
                     {
-                        if (_contentIdToCfcIdMap.TryGetValue(duty.Content.RowId, out var cfcId))
+                        if (UIState.IsInstanceContentCompleted(realDuty._contentFinderCondition.RowId))
                         {
-                            completedCfcIdsFromGame.Add(cfcId);
+                            if (_contentIdToCfcIdMap.TryGetValue(realDuty._contentFinderCondition.RowId, out var cfcId))
+                            {
+                                completedCfcIdsFromGame.Add(cfcId);
+                            }
                         }
                     }
+                    // Custom duties (CustomDutyInfo) are skipped - they cannot be checked via UIState
                 }
                 catch (Exception ex)
                 {
-                    Svc.Log.Warning($"Failed to check completion for duty {duty.Content.RowId}: {ex.Message}");
+                    Svc.Log.Warning($"Failed to check completion for duty {duty.RowId}: {ex.Message}");
                 }
             }
 
@@ -479,25 +488,34 @@ public class DutyProgressService : IDisposable
         {
             var allDuties = _contentFinderService.GetAllDuties();
 
-            // Populate mapping from Content ID to CFC ID
+            // Populate mapping from Content ID to CFC ID - only for real duties
             foreach (var duty in allDuties)
             {
-                _contentIdToCfcIdMap[duty.Content.RowId] = duty.RowId;
+                if (duty is RealDutyInfo realDuty)
+                {
+                    _contentIdToCfcIdMap[realDuty._contentFinderCondition.RowId] = duty.RowId;
+                }
             }
 
             // Check each duty against the game state using UIState.IsInstanceContentCompleted
+            // Skip custom duties as they don't have ContentFinderCondition data
             foreach (var duty in allDuties)
             {
                 try
                 {
-                    if (UIState.IsInstanceContentCompleted(duty.Content.RowId))
+                    // Only process real duties - skip custom duties (Hunt, FATE, Role Playing)
+                    if (duty is RealDutyInfo realDuty)
                     {
-                        // Map Content ID to CFC ID before adding to mirror
-                        if (_contentIdToCfcIdMap.TryGetValue(duty.Content.RowId, out var cfcId))
+                        if (UIState.IsInstanceContentCompleted(realDuty._contentFinderCondition.RowId))
                         {
-                            _completedDutiesMirror.Add(cfcId);
+                            // Map Content ID to CFC ID before adding to mirror
+                            if (_contentIdToCfcIdMap.TryGetValue(realDuty._contentFinderCondition.RowId, out var cfcId))
+                            {
+                                _completedDutiesMirror.Add(cfcId);
+                            }
                         }
                     }
+                    // Custom duties (CustomDutyInfo) are skipped - they cannot be checked via UIState
                 }
                 catch (Exception ex)
                 {

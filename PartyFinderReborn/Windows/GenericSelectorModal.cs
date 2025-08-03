@@ -107,7 +107,7 @@ public class GenericSelectorModal<T>
     /// <param name="items">The items to choose from</param>
     /// <param name="currentItem">The currently selected item (if any)</param>
     /// <param name="onItemSelected">Callback when an item is selected or modal is closed</param>
-    public void Open(List<ISelectableItem<T>> items, T currentItem, Action<T> onItemSelected)
+    public void Open(List<ISelectableItem<T>> items, T? currentItem, Action<T> onItemSelected)
     {
         _allItems = items;
         _initialSelection = currentItem != null && !EqualityComparer<T>.Default.Equals(currentItem, default(T)) ? 

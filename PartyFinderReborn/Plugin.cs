@@ -17,6 +17,7 @@ using PartyFinderReborn.Models;
 using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Game.Text.SeStringHandling.Payloads;
 using ECommons.ImGuiMethods;
+using PartyFinderReborn.Tests;
 
 namespace PartyFinderReborn;
 
@@ -89,6 +90,18 @@ public sealed class Plugin : IDalamudPlugin
             HelpMessage = "Opens the Party Finder Reborn interface"
         });
         
+        // Add debug command
+        Svc.Commands.AddHandler(DebugCommandName, new CommandInfo(OnDebugCommand)
+        {
+            HelpMessage = "Run ContentFinderService debug tests"
+        });
+        
+        // Add test command for custom duties
+        const string TestCommandName = "/pftest";
+        Svc.Commands.AddHandler(TestCommandName, new CommandInfo(OnTestCommand)
+        {
+            HelpMessage = "Run unit tests for custom duties functionality"
+        });
         
         // Handling config through main cmd
         Svc.Commands.AddHandler(ConfigCommandName, new CommandInfo(OnCommand)
@@ -164,6 +177,8 @@ public sealed class Plugin : IDalamudPlugin
         Svc.Commands.RemoveHandler(CommandName);
         Svc.Commands.RemoveHandler("/pfr"); // Remove alias
         Svc.Commands.RemoveHandler(ConfigCommandName);
+        Svc.Commands.RemoveHandler(DebugCommandName);
+        Svc.Commands.RemoveHandler("/pftest");
 
         Svc.Framework.Update -= OnFrameworkUpdate;
         
@@ -234,15 +249,62 @@ public sealed class Plugin : IDalamudPlugin
             var totalProgPointsCount = DutyProgressService.GetTotalProgPointsCount();
             var sessionProgPointsCount = ActionTrackingService.GetSeenProgPointsCount();
             
+            Svc.Chat.Print($"[Debug] Completed duties: {completedCount}");
+            Svc.Chat.Print($"[Debug] Prog points duties: {progPointsDutiesCount}");
+            Svc.Chat.Print($"[Debug] Total prog points: {totalProgPointsCount}");
+            Svc.Chat.Print($"[Debug] Session prog points: {sessionProgPointsCount}");
             
             if (completedCount > 0)
             {
                 var completedDuties = DutyProgressService.GetCompletedDuties();
+                var firstCompleted = completedDuties.FirstOrDefault();
+                Svc.Chat.Print($"[Debug] First completed duty: {firstCompleted}");
+            }
+            
+            // Show custom duties summary
+            var customDutiesSummary = ContentFinderServiceTests.GetCustomDutiesSummary(ContentFinderService);
+            var lines = customDutiesSummary.Split('\n');
+            foreach (var line in lines)
+            {
+                if (!string.IsNullOrWhiteSpace(line))
+                    Svc.Chat.Print($"[Debug] {line}");
             }
         }
         catch (Exception ex)
         {
             Svc.Log.Error($"Failed to get debug info: {ex.Message}");
+            Svc.Chat.PrintError($"Debug command failed: {ex.Message}");
+        }
+    }
+    
+    private void OnTestCommand(string command, string args)
+    {
+        try
+        {
+            Svc.Chat.Print("[Test] Running ContentFinderService unit tests...");
+            
+            var testResults = ContentFinderServiceTests.RunAllTests(ContentFinderService);
+            var lines = testResults.Split('\n');
+            
+            foreach (var line in lines)
+            {
+                if (!string.IsNullOrWhiteSpace(line))
+                {
+                    if (line.Contains("PASS"))
+                        Svc.Chat.Print($"[Test] {line}");
+                    else if (line.Contains("FAIL") || line.Contains("ERROR"))
+                        Svc.Chat.PrintError($"[Test] {line}");
+                    else
+                        Svc.Chat.Print($"[Test] {line}");
+                }
+            }
+            
+            Svc.Chat.Print("[Test] Unit tests completed.");
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Failed to run unit tests: {ex.Message}");
+            Svc.Chat.PrintError($"Test command failed: {ex.Message}");
         }
     }
     
