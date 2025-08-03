@@ -508,6 +508,16 @@ public override void Draw()
                         {
                             _ = LeavePartyAsync();
                         }
+                        
+                        // Display any warnings below the buttons for joined users
+                        if (!inSameDatacenter)
+                        {
+                            ImGui.TextColored(ImGuiColors.DalamudRed, "Must be in the same datacenter to join in-game party");
+                        }
+                        else if (isInParty)
+                        {
+                            ImGui.TextColored(ImGuiColors.DalamudRed, "Must leave current party to join in-game party");
+                        }
                     }
                     else
                     {
