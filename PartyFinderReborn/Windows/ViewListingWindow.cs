@@ -436,7 +436,7 @@ public override void Draw()
             ImGui.Separator();
             ImGui.BeginChild("Footer", new Vector2(0, 0), false, ImGuiWindowFlags.NoScrollbar);
             {
-                // Always visible buttons - positioned on the left
+                // Always visible buttons
                 double refreshWait = 0;
                 var refreshDisabled = IsRefreshing || !Plugin.DebounceService.CanExecute(ApiOperationType.Read, out refreshWait);
                 if (refreshDisabled && !IsRefreshing)
@@ -479,80 +479,50 @@ public override void Draw()
                         _ = CloseListingAsync();
                     }
                 }
-                // Non-owner join in-game party functionality
                 else
                 {
                     var userDatacenter = Plugin.WorldService.GetCurrentPlayerCurrentDataCenter();
                     var creatorDatacenter = Listing.Datacenter;
                     var inSameDatacenter = string.Equals(userDatacenter, creatorDatacenter, StringComparison.OrdinalIgnoreCase);
-                    
+
                     var isInParty = false;
                     Svc.Framework.RunOnFrameworkThread(() =>
                     {
                         isInParty = Svc.Party.Length > 1;
                     });
 
-                    var canJoinInGame = inSameDatacenter && !isInParty;
-
-                    ImGui.SameLine();
-                    ImGui.BeginDisabled(!canJoinInGame);
-                    if (ImGui.Button("Join In-Game Party", new Vector2(150, 0)) && canJoinInGame)
+                    if (Listing.HasJoined)
                     {
-                        SendInGamePartyJoinRequest();
-                    }
-                    ImGui.EndDisabled();
-
-                    // Warning message if requirements not met
-                    if (!canJoinInGame)
-                    {
-                        ImGui.NewLine();
-                        if (!inSameDatacenter)
+                        ImGui.SameLine();
+                        if (inSameDatacenter)
                         {
-                            ImGui.TextColored(ImGuiColors.DalamudRed, $"Must be in datacenter {creatorDatacenter} to join in-game party");
+                            if (ImGui.Button("Join In-Game Party", new Vector2(150, 0)))
+                            {
+                                SendInGamePartyJoinRequest();
+                            }
                         }
-                        else if (isInParty)
+                        else
                         {
-                            ImGui.TextColored(ImGuiColors.DalamudRed, "Already in a party - leave current party first");
+                            ImGui.TextColored(ImGuiColors.DalamudRed, "Must be in the same datacenter to join in-game party");
+                        }
+
+                        ImGui.SameLine();
+                        if (ImGui.Button("Leave Listing", new Vector2(100, 0)))
+                        {
+                            _ = LeavePartyAsync();
+                        }
+                    }
+                    else
+                    {
+                        ImGui.SameLine();
+                        if (ImGui.Button("Join Listing", new Vector2(120, 0)))
+                        {
+                            ShowJobSelectionPopup(JoinPartyWithJob);
                         }
                     }
                 }
             }
             ImGui.EndChild();
-        }
-        private void DrawJoinInGamePartyButton()
-        {
-var userDatacenter = Plugin.WorldService.GetCurrentPlayerCurrentDataCenter();
-            var creatorDatacenter = Listing.Datacenter;
-            var inSameDatacenter = string.Equals(userDatacenter, creatorDatacenter, StringComparison.OrdinalIgnoreCase);
-            
-            // Check if player is already in a party
-            var isInParty = false;
-            Svc.Framework.RunOnFrameworkThread(() =>
-            {
-                isInParty = Svc.Party.Length > 1; // More than 1 means player + others
-            });
-            
-            var isDisabled = !inSameDatacenter || isInParty;
-            
-            // Show explanatory text when button is disabled
-            if (isDisabled)
-            {
-                if (!inSameDatacenter)
-                {
-                    ImGui.TextColored(ImGuiColors.DalamudRed, $"Must be in datacenter {creatorDatacenter}");
-                }
-                else if (isInParty)
-                {
-                    ImGui.TextColored(ImGuiColors.DalamudRed, "Already in a party");
-                }
-            }
-
-            ImGui.BeginDisabled(isDisabled);
-            if (ImGui.Button("Join In-Game Party", new Vector2(150, 0)) && !isDisabled)
-            {
-                SendInGamePartyJoinRequest();
-            }
-            ImGui.EndDisabled();
         }
         
         // Helper to draw a styled section
