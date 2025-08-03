@@ -506,10 +506,10 @@ public class DutyProgressService : IDisposable
                     // Only process real duties - skip custom duties (Hunt, FATE, Role Playing)
                     if (duty is RealDutyInfo realDuty)
                     {
-                        if (UIState.IsInstanceContentCompleted(realDuty._contentFinderCondition.RowId))
+                        if (UIState.IsInstanceContentCompleted(realDuty._contentFinderCondition.Content.RowId))
                         {
                             // Map Content ID to CFC ID before adding to mirror
-                            if (_contentIdToCfcIdMap.TryGetValue(realDuty._contentFinderCondition.RowId, out var cfcId))
+                            if (_contentIdToCfcIdMap.TryGetValue(realDuty._contentFinderCondition.Content.RowId, out var cfcId))
                             {
                                 _completedDutiesMirror.Add(cfcId);
                             }
