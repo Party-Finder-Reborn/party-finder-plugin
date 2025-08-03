@@ -494,17 +494,14 @@ public override void Draw()
                     if (Listing.HasJoined)
                     {
                         ImGui.SameLine();
-                        if (inSameDatacenter)
+                        var canJoinInGame = inSameDatacenter && !isInParty;
+                        
+                        ImGui.BeginDisabled(!canJoinInGame);
+                        if (ImGui.Button("Join In-Game Party", new Vector2(150, 0)) && canJoinInGame)
                         {
-                            if (ImGui.Button("Join In-Game Party", new Vector2(150, 0)))
-                            {
-                                SendInGamePartyJoinRequest();
-                            }
+                            SendInGamePartyJoinRequest();
                         }
-                        else
-                        {
-                            ImGui.TextColored(ImGuiColors.DalamudRed, "Must be in the same datacenter to join in-game party");
-                        }
+                        ImGui.EndDisabled();
 
                         ImGui.SameLine();
                         if (ImGui.Button("Leave Listing", new Vector2(100, 0)))
