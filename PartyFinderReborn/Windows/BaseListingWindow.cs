@@ -309,6 +309,13 @@ public abstract class BaseListingWindow : Window, IDisposable
                 return;
             }
             
+            // Validate required plugins client-side before attempting to join
+            if (!ValidateRequiredPlugins(Listing.RequiredPlugins))
+            {
+                // Validation failed, error message already shown in ValidateRequiredPlugins
+                return;
+            }
+            
             Svc.Log.Info($"Attempting to join party listing {Listing.Id}");
             
             var joinResult = await ApiService.JoinListingAsync(Listing.Id);
@@ -454,6 +461,52 @@ public abstract class BaseListingWindow : Window, IDisposable
         }
         
         return progPoints;
+    }
+    
+    /// <summary>
+    /// Validates that all required plugins are installed before allowing the user to join
+    /// </summary>
+    /// <param name="requiredPlugins">List of required plugin names from the listing</param>
+    /// <returns>True if all plugins are installed, false otherwise</returns>
+    protected bool ValidateRequiredPlugins(List<string> requiredPlugins)
+    {
+        if (requiredPlugins == null || requiredPlugins.Count == 0)
+            return true;
+        
+        try
+        {
+            var installedPlugins = PluginService.GetInstalled().ToList();
+            var missingPlugins = new List<string>();
+            
+            foreach (var requiredPlugin in requiredPlugins)
+            {
+                // Check if the plugin is installed by friendly name or internal name
+                var isInstalled = installedPlugins.Any(p => 
+                    p.Name.Equals(requiredPlugin, StringComparison.OrdinalIgnoreCase) ||
+                    p.InternalName.Equals(requiredPlugin, StringComparison.OrdinalIgnoreCase));
+                
+                if (!isInstalled)
+                {
+                    missingPlugins.Add(requiredPlugin);
+                }
+            }
+            
+            if (missingPlugins.Count > 0)
+            {
+                var pluginList = string.Join(", ", missingPlugins);
+                Svc.Chat.PrintError($"[Party Finder Reborn] Cannot join party - missing required plugins: {pluginList}");
+                Svc.Log.Warning($"Join blocked due to missing required plugins: {pluginList}");
+                return false;
+            }
+            
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Error validating required plugins: {ex.Message}");
+            // In case of error, allow the join attempt (fail open)
+            return true;
+        }
     }
     
     protected string FormatProgPointsAsString(List<uint> progPoints)

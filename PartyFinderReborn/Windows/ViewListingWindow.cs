@@ -63,6 +63,13 @@ public override void Draw()
         _isJoining = true;
         try
         {
+            // Validate required plugins client-side before attempting to join
+            if (!ValidateRequiredPlugins(Listing.RequiredPlugins))
+            {
+                // Validation failed, error message already shown in ValidateRequiredPlugins
+                return;
+            }
+            
             var joinResult = await Plugin.ApiService.JoinListingWithJobAsync(Listing.Id, job);
             if (joinResult != null && joinResult.Success)
             {

@@ -400,42 +400,6 @@ public class ApiError
 }
 
 /// <summary>
-/// Available datacenters
-/// </summary>
-public static class Datacenters
-{
-    public static readonly Dictionary<string, string> All = new()
-    {
-        { "aether", "Aether" },
-        { "crystal", "Crystal" },
-        { "dynamis", "Dynamis" },
-        { "primal", "Primal" },
-        { "chaos", "Chaos" },
-        { "light", "Light" },
-        { "materia", "Materia" },
-        { "elemental", "Elemental" },
-        { "gaia", "Gaia" },
-        { "mana", "Mana" },
-        { "meteor", "Meteor" }
-    };
-    
-    public static readonly Dictionary<string, List<string>> Worlds = new()
-    {
-        ["aether"] = new() { "Adamantoise", "Cactuar", "Faerie", "Gilgamesh", "Jenova", "Midgardsormr", "Sargatanas", "Siren" },
-        ["crystal"] = new() { "Balmung", "Brynhildr", "Coeurl", "Diabolos", "Goblin", "Malboro", "Mateus", "Zalera" },
-        ["dynamis"] = new() { "Halicarnassus", "Maduin", "Marilith", "Seraph" },
-        ["primal"] = new() { "Behemoth", "Excalibur", "Exodus", "Famfrit", "Hyperion", "Lamia", "Leviathan", "Ultros" },
-        ["chaos"] = new() { "Cerberus", "Louisoix", "Moogle", "Omega", "Phantom", "Ragnarok", "Sagittarius", "Spriggan" },
-        ["light"] = new() { "Alpha", "Lich", "Odin", "Phoenix", "Raiden", "Shiva", "Twintania", "Zodiark" },
-        ["materia"] = new() { "Bismarck", "Ravana", "Sephirot", "Sophia", "Zurvan" },
-        ["elemental"] = new() { "Aegis", "Atomos", "Carbuncle", "Garuda", "Gungnir", "Kujata", "Ramuh", "Tonberry", "Typhon", "Unicorn" },
-        ["gaia"] = new() { "Alexander", "Bahamut", "Durandal", "Fenrir", "Ifrit", "Ridill", "Tiamat", "Ultima" },
-        ["mana"] = new() { "Anima", "Asura", "Chocobo", "Hades", "Ixion", "Masamune", "Pandaemonium", "Titan" },
-        ["meteor"] = new() { "Belias", "Mandragora", "Ramuh", "Shinryu", "Unicorn", "Valefor", "Yojimbo", "Zeromus" }
-    };
-}
-
-/// <summary>
 /// Result of joining a party listing
 /// </summary>
 public class JoinResult
