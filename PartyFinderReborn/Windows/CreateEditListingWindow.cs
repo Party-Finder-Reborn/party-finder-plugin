@@ -517,7 +517,8 @@ namespace PartyFinderReborn.Windows
         
         private void OnRequiredPluginSelected(string? pluginName)
         {
-            if (pluginName != null && !_editRequiredPlugins.Contains(pluginName))
+            // Only add the plugin if it's not null and not already in the list
+            if (!string.IsNullOrEmpty(pluginName) && !_editRequiredPlugins.Contains(pluginName))
             {
                 _editRequiredPlugins.Add(pluginName);
             }
@@ -604,6 +605,8 @@ namespace PartyFinderReborn.Windows
                     result = await ApiService.UpdateListingAsync(Listing.Id, updatedListing);
                 }
                 
+                var wasCreateMode = IsCreateMode;
+                
                 if (result.Success && result.Listing != null)
                 {
                     Listing = result.Listing;
@@ -613,15 +616,16 @@ namespace PartyFinderReborn.Windows
                     var dutyName = ContentFinderService.GetDutyDisplayName(Listing.CfcId);
                     WindowName = $"{dutyName}##detail_{Listing.Id}";
                     IsEditing = false;
-                    var wasCreateMode = IsCreateMode;
                     IsCreateMode = false;
                     
-Svc.Log.Info($"Successfully {(wasCreateMode ? "created" : "updated")} listing for duty {dutyName} (ID: {Listing.Id}, CurrentSize: {Listing.CurrentSize})");
+                    Svc.Log.Info($"Successfully {(wasCreateMode ? "created" : "updated")} listing for duty {dutyName} (ID: {Listing.Id}, CurrentSize: {Listing.CurrentSize})");
 
                     // Start notification worker for newly created listings
                     if (wasCreateMode)
                     {
                         Plugin.StartJoinNotificationWorker(Listing.Id);
+                        // Trigger event for successful listing creation
+                        Plugin.TriggerListingCreated();
                     }
 
                     IsOpen = false;

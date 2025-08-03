@@ -80,6 +80,9 @@ public class ParticipantInfo
     
     [JsonProperty("job")]
     public string Job { get; set; } = string.Empty;
+    
+    [JsonProperty("discord_id")]
+    public string DiscordId { get; set; } = string.Empty;
 }
 
 /// <summary>

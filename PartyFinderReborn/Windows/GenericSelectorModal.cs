@@ -348,13 +348,10 @@ public class GenericSelectorModal<T>
         {
             if (submitted && _selectedItem != null)
             {
+                // Only pass the selected item if the user submitted
                 callback(_selectedItem.Item);
             }
-            else if (!submitted && _initialSelection != null)
-            {
-                // If cancelled, return the original selection
-                callback(_initialSelection.Item);
-            }
+            // If cancelled, don't call the callback at all - no changes should be made
         }
         
         // Clean up

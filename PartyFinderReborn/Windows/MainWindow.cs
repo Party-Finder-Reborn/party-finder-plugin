@@ -989,4 +989,13 @@ var description = string.IsNullOrWhiteSpace(listing.Description) ? "No descripti
         // Load fresh data from the first page
         _ = LoadPartyListingsAsync();
     }
+    
+    /// <summary>
+    /// Event handler for when a listing is successfully created
+    /// </summary>
+    public void OnListingCreated()
+    {
+        Svc.Log.Debug("OnListingCreated event received - refreshing main window listings");
+        ResetPaginationAndRefresh();
+    }
 }

@@ -122,13 +122,12 @@ public override void Draw()
         /// <summary>
         /// Kick a participant from the party
         /// </summary>
-        private async Task KickParticipantAsync(string participantName)
+        private async Task KickParticipantAsync(string participantDiscordId)
         {
             try
             {
-                // For now, we'll use the participant name as the user identifier
-                // This is a temporary solution until we update the server to provide user IDs
-                var kickResult = await Plugin.ApiService.KickParticipantAsync(Listing.Id, participantName);
+                // Use the participant's Discord ID for the kick request
+                var kickResult = await Plugin.ApiService.KickParticipantAsync(Listing.Id, participantDiscordId);
                 
                 if (kickResult != null && kickResult.Success)
                 {
@@ -245,7 +244,7 @@ public override void Draw()
                         var isLocalPlayer = !string.IsNullOrEmpty(localPlayerName) && participant.Name.Equals(localPlayerName, StringComparison.OrdinalIgnoreCase);
                         
                         // Check if this participant has a pending invitation
-                        var pendingInvitation = Listing.IsOwner ? Plugin.GetPendingInvitationForParticipant(Listing.Id, participant.Name) : null;
+                        var pendingInvitation = Listing.IsOwner ? Plugin.GetPendingInvitationForParticipant(Listing.Id, participant.DiscordId) : null;
                         var hasPendingInvite = pendingInvitation != null;
 
                         // Display participant job name (improved from generic role)
@@ -253,21 +252,8 @@ public override void Draw()
 
                         ImGui.TableNextColumn();
                         
-                        // Wrap the name cell with context menu (only if this user is the owner)
-                        if (Listing.IsOwner && ImGui.BeginPopupContextItem($"participant_context_{i}"))
-                        {
-                            // Only show kick option for other players (not the creator themselves)
-                            if (!isLocalPlayer)
-                            {
-                                if (ImGui.MenuItem("Kick from Party"))
-                                {
-                                    _ = KickParticipantAsync(participant.Name);
-                                }
-                            }
-                            ImGui.EndPopup();
-                        }
-                        
                         // Display participant name with special effects for pending invites
+                        // Wrap name text with Selectable to enable context menu only on name
                         if (hasPendingInvite)
                         {
                             // Rainbow effect for participants with pending invitations
@@ -277,20 +263,45 @@ public override void Draw()
                             var rainbowVec4 = new Vector4(r, g, b, 1.0f);
                             
                             ImGui.PushStyleColor(ImGuiCol.Text, rainbowVec4);
-                            ImGui.Text(participant.Name);
+                            if (Listing.IsOwner && ImGui.Selectable(participant.Name, false, ImGuiSelectableFlags.None))
+                            {
+                                // Selectable clicked, but we don't need to do anything special
+                            }
                             ImGui.PopStyleColor();
                         }
                         else if (isLocalPlayer)
                         {
                             ImGui.PushStyleColor(ImGuiCol.Text, Yellow);
-                            ImGui.Text(participant.Name);
+                            if (Listing.IsOwner && ImGui.Selectable($"{participant.Name} (You)", false, ImGuiSelectableFlags.None))
+                            {
+                                // Selectable clicked, but we don't need to do anything special
+                            }
                             ImGui.PopStyleColor();
-                            ImGui.SameLine();
-                            ImGui.TextColored(ImGuiColors.DalamudGrey, "(You)");
                         }
                         else
                         {
-                            ImGui.Text(participant.Name);
+                            if (Listing.IsOwner && ImGui.Selectable(participant.Name, false, ImGuiSelectableFlags.None))
+                            {
+                                // Selectable clicked, but we don't need to do anything special
+                            }
+                            else if (!Listing.IsOwner)
+                            {
+                                ImGui.Text(participant.Name);
+                            }
+                        }
+                        
+                        // Context menu attached to the name (only if this user is the owner)
+                        if (Listing.IsOwner && ImGui.BeginPopupContextItem($"participant_context_{i}"))
+                        {
+                            // Only show kick option for other players (not the creator themselves)
+                            if (!isLocalPlayer)
+                            {
+                                if (ImGui.MenuItem("Kick from Party"))
+                                {
+                                    _ = KickParticipantAsync(participant.DiscordId);
+                                }
+                            }
+                            ImGui.EndPopup();
                         }
                         
                         ImGui.TableNextColumn();
@@ -428,7 +439,60 @@ public override void Draw()
             
             ImGui.BeginChild("Footer", new Vector2(0, 0), false, ImGuiWindowFlags.NoScrollbar);
             {
-                // Join/Leave/Close buttons
+                // Calculate button dimensions and spacing
+                var contentWidth = ImGui.GetContentRegionMax().X;
+                var closeButtonWidth = 60f;
+                var editButtonWidth = 60f;
+                var refreshButtonWidth = 80f;
+                var buttonSpacing = ImGui.GetStyle().ItemSpacing.X;
+                
+                // Always render Close + Refresh first (anchored right) - these are always visible
+                // Close button (rightmost)
+                ImGui.SameLine(contentWidth - closeButtonWidth);
+                if (ImGui.Button("Close", new Vector2(closeButtonWidth, 0)))
+                {
+                    IsOpen = false;
+                }
+                
+                // Edit button (if owner, to the left of Close)
+                if (Listing.IsOwner)
+                {
+                    ImGui.SameLine(contentWidth - closeButtonWidth - buttonSpacing - editButtonWidth);
+                    if (ImGui.Button("Edit", new Vector2(editButtonWidth, 0)))
+                    {
+                        var editWindow = new CreateEditListingWindow(Plugin, Listing, false);
+                        Plugin.WindowSystem.AddWindow(editWindow);
+                        editWindow.IsOpen = true;
+                    }
+                }
+                
+                // Refresh button (to the left of Edit/Close) - always visible
+                var refreshButtonStart = Listing.IsOwner 
+                    ? contentWidth - closeButtonWidth - buttonSpacing - editButtonWidth - buttonSpacing - refreshButtonWidth
+                    : contentWidth - closeButtonWidth - buttonSpacing - refreshButtonWidth;
+                    
+                ImGui.SameLine(refreshButtonStart);
+                double refreshWait = 0;
+                var refreshDisabled = IsRefreshing || !Plugin.DebounceService.CanExecute(ApiOperationType.Read, out refreshWait);
+                if (refreshDisabled && !IsRefreshing)
+                {
+                    // Update timer each frame for smooth countdown
+                    refreshWait = Plugin.DebounceService.SecondsRemaining(ApiOperationType.Read);
+                }
+                
+                ImGui.BeginDisabled(refreshDisabled);
+                if (ImGui.Button(IsRefreshing ? "Refreshing..." : "Refresh", new Vector2(refreshButtonWidth, 0))) { _ = RefreshListingAsync(); }
+                ImGui.EndDisabled();
+                
+                if (refreshDisabled && !IsRefreshing && ImGui.IsItemHovered())
+                {
+                    ImGui.SetTooltip($"Please wait {refreshWait:F1}s");
+                }
+                
+                // Now draw Join/Leave/CloseListing block on left side with party conditionals
+                // Reset cursor to start of line for left-side buttons
+                ImGui.SameLine(0); // Move to leftmost position
+                
                 if (Listing.IsActive)
                 {
                     if (Listing.IsOwner)
@@ -484,61 +548,12 @@ public override void Draw()
                         ImGui.EndDisabled();
                     }
                 }
-                
-                // Calculate button positioning from right side
-                var contentWidth = ImGui.GetContentRegionMax().X;
-                var closeButtonWidth = 60f;
-                var editButtonWidth = 60f;
-                var refreshButtonWidth = 80f;
-                var buttonSpacing = ImGui.GetStyle().ItemSpacing.X;
-                
-                // Close button (rightmost)
-                ImGui.SameLine(contentWidth - closeButtonWidth);
-                if (ImGui.Button("Close", new Vector2(closeButtonWidth, 0)))
-                {
-                    IsOpen = false;
-                }
-                
-                // Edit button (if owner, to the left of Close)
-                if (Listing.IsOwner)
-                {
-                    ImGui.SameLine(contentWidth - closeButtonWidth - buttonSpacing - editButtonWidth);
-                    if (ImGui.Button("Edit", new Vector2(editButtonWidth, 0)))
-                    {
-                        var editWindow = new CreateEditListingWindow(Plugin, Listing, false);
-                        Plugin.WindowSystem.AddWindow(editWindow);
-                        editWindow.IsOpen = true;
-                    }
-                }
-                
-                // Refresh button (to the left of Edit/Close)
-                var refreshButtonStart = Listing.IsOwner 
-                    ? contentWidth - closeButtonWidth - buttonSpacing - editButtonWidth - buttonSpacing - refreshButtonWidth
-                    : contentWidth - closeButtonWidth - buttonSpacing - refreshButtonWidth;
-                    
-                ImGui.SameLine(refreshButtonStart);
-                double refreshWait = 0;
-                var refreshDisabled = IsRefreshing || !Plugin.DebounceService.CanExecute(ApiOperationType.Read, out refreshWait);
-                if (refreshDisabled && !IsRefreshing)
-                {
-                    // Update timer each frame for smooth countdown
-                    refreshWait = Plugin.DebounceService.SecondsRemaining(ApiOperationType.Read);
-                }
-                
-                ImGui.BeginDisabled(refreshDisabled);
-                if (ImGui.Button(IsRefreshing ? "Refreshing..." : "Refresh", new Vector2(refreshButtonWidth, 0))) { _ = RefreshListingAsync(); }
-                ImGui.EndDisabled();
-                
-                if (refreshDisabled && !IsRefreshing && ImGui.IsItemHovered())
-                {
-                    ImGui.SetTooltip($"Please wait {refreshWait:F1}s");
-                }
             }
             ImGui.EndChild();
         }
         private void DrawJoinInGamePartyButton()
         {
-            var userDatacenter = Plugin.WorldService.GetCurrentPlayerHomeDataCenter();
+var userDatacenter = Plugin.WorldService.GetCurrentPlayerCurrentDataCenter();
             var creatorDatacenter = Listing.Datacenter;
             var inSameDatacenter = string.Equals(userDatacenter, creatorDatacenter, StringComparison.OrdinalIgnoreCase);
             
@@ -556,7 +571,7 @@ public override void Draw()
             {
                 if (!inSameDatacenter)
                 {
-                    ImGui.TextColored(ImGuiColors.DalamudRed, "Must be in same datacenter");
+                    ImGui.TextColored(ImGuiColors.DalamudRed, $"Must be in datacenter {creatorDatacenter}");
                 }
                 else if (isInParty)
                 {
@@ -642,12 +657,22 @@ private void SendInGamePartyJoinRequest()
             Svc.Framework.RunOnFrameworkThread(() =>
             {
                 characterName = Svc.ClientState.LocalPlayer?.Name.TextValue;
-                worldName = Svc.ClientState.LocalPlayer?.CurrentWorld.Value.Name.ExtractText();
+                worldName = Plugin.WorldService.GetCurrentPlayerHomeWorld();
             });
 
             if (characterName == null || worldName == null)
             {
                 Svc.Chat.PrintError("Failed to get character information for party request.");
+                return;
+            }
+
+var userDatacenter = Plugin.WorldService.GetCurrentPlayerCurrentDataCenter();
+            var creatorDatacenter = Listing.Datacenter;
+            var inSameDatacenter = string.Equals(userDatacenter, creatorDatacenter, StringComparison.OrdinalIgnoreCase);
+
+            if (!inSameDatacenter)
+            {
+                Svc.Chat.PrintError($"You must be on datacenter {creatorDatacenter} to join this party.");
                 return;
             }
 

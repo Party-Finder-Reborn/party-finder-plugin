@@ -48,6 +48,9 @@ public sealed class Plugin : IDalamudPlugin
     private readonly Dictionary<uint, Action<uint, SeString>> _chatLinkHandlers = new();
     private readonly HashSet<string> _notifiedInvitations = new(); // Track which invitations we've already shown to user
     private readonly Dictionary<string, List<InvitationNotification>> _pendingInvitationsByListing = new(); // Track pending invitations by listing ID
+    
+    // Event for listing creation
+    public event Action? OnListingCreated;
 
     public Plugin(IDalamudPluginInterface pluginInterface)
     {
@@ -108,6 +111,9 @@ public sealed class Plugin : IDalamudPlugin
         // Subscribe to configuration changes
         Configuration.ConfigUpdated += OnConfigurationUpdated;
         
+        // Subscribe MainWindow to listing creation events
+        OnListingCreated += MainWindow.OnListingCreated;
+        
         // Validate API key on startup if one exists
         if (!string.IsNullOrEmpty(Configuration.ApiKey))
         {
@@ -163,6 +169,9 @@ public sealed class Plugin : IDalamudPlugin
         
         // Unsubscribe from configuration changes
         Configuration.ConfigUpdated -= OnConfigurationUpdated;
+        
+        // Unsubscribe from listing creation events
+        OnListingCreated -= MainWindow.OnListingCreated;
         
         // Cancel all notification workers
         foreach (var (listingId, cts) in _notificationWorkers)
@@ -385,14 +394,7 @@ public sealed class Plugin : IDalamudPlugin
         // Create the handler for this specific invite
         Action<uint, SeString> handler = (id, seString) =>
         {
-            InvitePlayerToParty(notification.CharacterName, notification.CharacterWorld, notification.Id);
-            
-            // Remove the handler after use
-            if (_chatLinkHandlers.ContainsKey(commandId))
-            {
-                Svc.PluginInterface.RemoveChatLinkHandler(commandId);
-                _chatLinkHandlers.Remove(commandId);
-            }
+            InvitePlayerToParty(notification.CharacterName, notification.CharacterWorld, notification.Id, commandId);
         };
         
         // Register the handler and store it
@@ -452,7 +454,7 @@ public sealed class Plugin : IDalamudPlugin
         Svc.Chat.PrintError(message);
     }
 
-    private unsafe void InvitePlayerToParty(string? characterName, string? characterWorld, string? notificationId)
+    private unsafe void InvitePlayerToParty(string? characterName, string? characterWorld, string? notificationId, uint? commandId = null)
     {
         if (string.IsNullOrEmpty(characterName) || string.IsNullOrEmpty(characterWorld))
         {
@@ -469,21 +471,21 @@ public sealed class Plugin : IDalamudPlugin
                 if (ECommons.GameHelpers.Player.IsBusy)
                 {
                     Svc.Chat.PrintError($"You are currently busy and cannot send a party invitation to {characterName}@{characterWorld}. Please finish what you're doing and try again.");
-                    return;
+                    return; // Don't remove handler - user can try again later
                 }
 
                 var infoModule = InfoModule.Instance();
                 if (infoModule == null)
                 {
                     Svc.Chat.PrintError("Failed to access InfoModule.");
-                    return;
+                    return; // Don't remove handler - this might be temporary
                 }
 
                 var partyInviteProxy = (InfoProxyPartyInvite*)infoModule->GetInfoProxyById(InfoProxyId.PartyInvite);
                 if (partyInviteProxy == null)
                 {
                     Svc.Chat.PrintError("Failed to access PartyInvite proxy.");
-                    return;
+                    return; // Don't remove handler - this might be temporary
                 }
 
                 // Try to invite by character name and world
@@ -491,13 +493,20 @@ public sealed class Plugin : IDalamudPlugin
                 if (worldId == 0)
                 {
                     Svc.Chat.PrintError($"Unknown world: {characterWorld}");
-                    return;
+                    return; // Don't remove handler - world should be valid, but might be temporary issue
                 }
 
                 var success = partyInviteProxy->InviteToParty(0, characterName, worldId);
                 if (success)
                 {
                     Svc.Chat.Print($"Party invitation sent to {characterName}@{characterWorld}.");
+                    
+                    // Remove the chat link handler only on successful invite
+                    if (commandId.HasValue && _chatLinkHandlers.ContainsKey(commandId.Value))
+                    {
+                        Svc.PluginInterface.RemoveChatLinkHandler(commandId.Value);
+                        _chatLinkHandlers.Remove(commandId.Value);
+                    }
                     
                     // Dismiss the notification from the server after successful invite
                     // We need to do this outside the unsafe context
@@ -506,12 +515,14 @@ public sealed class Plugin : IDalamudPlugin
                 else
                 {
                     Svc.Chat.PrintError($"Failed to send party invitation to {characterName}@{characterWorld}.");
+                    // Don't remove handler - user can try again later
                 }
             }
             catch (Exception ex)
             {
                 Svc.Chat.PrintError($"Error sending party invitation: {ex.Message}");
                 Svc.Log.Error($"Error in InvitePlayerToParty: {ex}");
+                // Don't remove handler - this was an unexpected error, user can try again
             }
         });
     }
@@ -568,13 +579,13 @@ public sealed class Plugin : IDalamudPlugin
     }
     
     /// <summary>
-    /// Get pending invitation by participant Discord name
+    /// Get pending invitation by participant Discord ID
     /// </summary>
-    public InvitationNotification? GetPendingInvitationForParticipant(string listingId, string participantName)
+    public InvitationNotification? GetPendingInvitationForParticipant(string listingId, string participantDiscordId)
     {
         var pendingInvitations = GetPendingInvitations(listingId);
         return pendingInvitations.FirstOrDefault(inv => 
-            inv.Requester.DisplayName.Equals(participantName, StringComparison.OrdinalIgnoreCase));
+            inv.Requester.DiscordId.Equals(participantDiscordId, StringComparison.OrdinalIgnoreCase));
     }
     
     /// <summary>
@@ -583,6 +594,14 @@ public sealed class Plugin : IDalamudPlugin
     public void InvitePlayerToPartyFromUI(string? characterName, string? characterWorld, string? notificationId)
     {
         InvitePlayerToParty(characterName, characterWorld, notificationId);
+    }
+    
+    /// <summary>
+    /// Trigger the listing created event
+    /// </summary>
+    public void TriggerListingCreated()
+    {
+        OnListingCreated?.Invoke();
     }
     
     private void OnConfigurationUpdated()
