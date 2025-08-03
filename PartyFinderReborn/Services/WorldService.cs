@@ -13,7 +13,6 @@ public class WorldService : IDisposable
 {
     public WorldService()
     {
-        Svc.Log.Info("WorldService initialized using ECommons ExcelWorldHelper");
     }
 
     /// <summary>
@@ -122,6 +121,5 @@ public class WorldService : IDisposable
 
     public void Dispose()
     {
-        Svc.Log.Info("WorldService disposed");
     }
 }

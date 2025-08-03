@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using System.Threading.Tasks;
+using Dalamud.Interface;
 using Dalamud.Interface.Windowing;
 using ECommons.DalamudServices;
 using ImGuiNET;
@@ -39,6 +40,7 @@ namespace PartyFinderReborn.Windows
 
         // Duty selection state
         private ContentFinderCondition? _selectedDuty;
+        private bool _hasLoadedProgPointsOnShow = false;
         
         public CreateEditListingWindow(Plugin plugin, PartyListing listing, bool createMode = false) : base(plugin, listing, $"{(createMode ? "Create" : "Edit")} Listing##edit_{listing.Id}")
         {
@@ -65,7 +67,7 @@ namespace PartyFinderReborn.Windows
             _editMinItemLevel = listing.MinItemLevel;
             _editMaxItemLevel = listing.MaxItemLevel;
             _editRequiredClears = new List<uint>(listing.RequiredClears);
-            _editProgPoint = ParseProgPointFromString(listing.ProgPoint);
+            _editProgPoint = new List<uint>(listing.ProgPoint);
             _editExperienceLevel = string.IsNullOrEmpty(listing.ExperienceLevel) ? "fresh" : listing.ExperienceLevel;
             _editRequiredPlugins = new List<string>(listing.RequiredPlugins);
             _editVoiceChatRequired = listing.VoiceChatRequired;
@@ -100,6 +102,13 @@ namespace PartyFinderReborn.Windows
 
         public override void Draw()
         {
+            // Load prog points on first draw if editing an existing listing
+            if (!IsCreateMode && _editCfcId != 0 && !_hasLoadedProgPointsOnShow)
+            {
+                _ = Task.Run(async () => await DutyProgressService.LoadAndCacheAllowedProgPointsAsync(_editCfcId));
+                _hasLoadedProgPointsOnShow = true;
+            }
+            
             DrawEditForm();
             ImGui.Separator();
             DrawActionButtons();
@@ -484,6 +493,12 @@ namespace PartyFinderReborn.Windows
         {
             _selectedDuty = selectedDuty;
             _editCfcId = selectedDuty?.RowId ?? 0;
+            
+            // Load allowed progression points for the selected duty
+            if (_editCfcId != 0)
+            {
+                _ = Task.Run(async () => await DutyProgressService.LoadAndCacheAllowedProgPointsAsync(_editCfcId));
+            }
         }
         
         private void OnRequiredClearSelected(ContentFinderCondition? selectedDuty)
@@ -561,7 +576,7 @@ namespace PartyFinderReborn.Windows
                     MinItemLevel = _editMinItemLevel,
                     MaxItemLevel = _editMaxItemLevel,
                     RequiredClears = new List<uint>(_editRequiredClears),
-                    ProgPoint = FormatProgPointsAsString(_editProgPoint),
+                    ProgPoint = FormatProgPointsForJson(_editProgPoint),
                     ExperienceLevel = _editExperienceLevel,
                     // API expects friendly plugin names (not internal names) for proper client-side matching
                     // This allows joiners to check if they have the required plugins by name
@@ -638,8 +653,8 @@ Svc.Log.Info($"Successfully {(wasCreateMode ? "created" : "updated")} listing fo
         
         private void DrawProgressPointsSection()
         {
-            ImGui.Text("Progress Points (Boss Abilities)");
-            ImGui.TextDisabled("Select specific boss abilities that party members must have seen");
+            ImGui.Text("Progress Points (Mechanics)");
+            ImGui.TextDisabled("Select specific mechanics that party members must have seen");
             
             try
             {
@@ -651,13 +666,21 @@ Svc.Log.Info($"Successfully {(wasCreateMode ? "created" : "updated")} listing fo
                         for (int i = _editProgPoint.Count - 1; i >= 0; i--)
                         {
                             var actionId = _editProgPoint[i];
-                            var actionName = ActionNameService.Get(actionId);
+                            // Try to get server-provided friendly name first, fallback to ActionNameService
+                            var actionName = DutyProgressService.GetProgPointFriendlyName(_editCfcId, actionId);
+                            if (actionName == $"Action #{actionId}")
+                            {
+                                // Fallback to ActionNameService if no server-provided name
+                                actionName = ActionNameService.Get(actionId);
+                            }
                             ImGui.Text($"• {actionName}");
                             ImGui.SameLine();
-                            if (ImGui.SmallButton($"✕##remove_progpoint_{i}"))
+                            ImGui.PushFont(UiBuilder.IconFont);
+                            if (ImGui.SmallButton($"{FontAwesomeIcon.Times.ToIconString()}##remove_progpoint_{i}"))
                             {
                                 _editProgPoint.RemoveAt(i);
                             }
+                            ImGui.PopFont();
                         }
                     }
                     ImGui.EndChild();
@@ -669,7 +692,8 @@ Svc.Log.Info($"Successfully {(wasCreateMode ? "created" : "updated")} listing fo
                 
                 ImGui.Spacing();
                 
-                var availableProgPoints = GetAvailableProgPointsWithCache(_editCfcId);
+var allowedProgPointsSet = DutyProgressService.GetAllowedProgPointsForDuty(_editCfcId);
+var availableProgPoints = allowedProgPointsSet?.ToList() ?? new List<uint>();
                 
                 ImGui.Text("Add Progress Points:");
                 if (ProgPointsLoading)
@@ -678,16 +702,22 @@ Svc.Log.Info($"Successfully {(wasCreateMode ? "created" : "updated")} listing fo
                 }
                 else if (availableProgPoints.Count > 0)
                 {
-                    ImGui.TextDisabled($"Available abilities for this duty ({availableProgPoints.Count} total)");
+                    ImGui.TextDisabled($"Available mechanics for this duty ({availableProgPoints.Count} total)");
 
-                    if (ImGui.BeginCombo("##select_progpoint", "Select an ability to add..."))
+                    if (ImGui.BeginCombo("##select_progpoint", "Select a mechanic to add..."))
                     {
                         foreach (var actionId in availableProgPoints)
                         {
                             if (_editProgPoint.Contains(actionId))
                                 continue;
 
-                            var actionName = ActionNameService.Get(actionId);
+                            // Try to get server-provided friendly name first, fallback to ActionNameService
+                            var actionName = DutyProgressService.GetProgPointFriendlyName(_editCfcId, actionId);
+                            if (actionName == $"Action #{actionId}")
+                            {
+                                // Fallback to ActionNameService if no server-provided name
+                                actionName = ActionNameService.Get(actionId);
+                            }
 
                             if (ImGui.Selectable($"{actionName}##add_progpoint_{actionId}"))
                             {
@@ -703,7 +733,6 @@ Svc.Log.Info($"Successfully {(wasCreateMode ? "created" : "updated")} listing fo
                 else
                 {
                     ImGui.TextDisabled("No progress points available for this duty.");
-                    ImGui.TextDisabled("Progress points will appear here after you've encountered boss abilities in-game.");
                 }
             }
             catch (Exception ex)

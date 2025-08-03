@@ -61,7 +61,6 @@ public class ContentFinderService : IDisposable
             // Sort by name for better user experience
             _sortedDuties = duties.OrderBy(d => d.Name.ExtractText()).ToList();
             
-            Svc.Log.Info($"Loaded {_contentFinderCache.Count} Content Finder Conditions with {_territoryToCfc.Count} territory mappings");
         }
         catch (Exception ex)
         {

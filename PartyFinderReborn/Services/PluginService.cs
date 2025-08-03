@@ -15,7 +15,6 @@ public class PluginService : IDisposable
 {
     public PluginService()
     {
-        Svc.Log.Info("PluginService initialized");
     }
 
     /// <summary>
@@ -52,6 +51,5 @@ public class PluginService : IDisposable
 
     public void Dispose()
     {
-        Svc.Log.Info("PluginService disposed");
     }
 }

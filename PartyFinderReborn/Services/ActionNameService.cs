@@ -61,7 +61,6 @@ public class ActionNameService : IDisposable
                     _actionNameCache[action.RowId] = actionName;
                 }
                 
-                Svc.Log.Info($"Loaded {_actionNameCache.Count} Action names");
                 _isInitialized = true;
             }
             catch (Exception ex)
@@ -90,7 +89,6 @@ public class ActionNameService : IDisposable
         // Debug logging to help diagnose the issue
         if (result == $"Action #{id}")
         {
-            Svc.Log.Debug($"Action #{id} not found in cache (cache size: {_actionNameCache?.Count ?? 0})");
         }
         
         return result;
@@ -121,7 +119,6 @@ public class ActionNameService : IDisposable
     {
         // TODO: Implement when CFC → Action mapping sheet is discovered
         // This might involve looking at Instance Content sheets or other related data
-        Svc.Log.Debug($"GetActionsForCfc({cfcId}) called - mapping not yet implemented");
         return Enumerable.Empty<(uint id, string name)>();
     }
     

@@ -11,7 +11,8 @@ using Dalamud.Game.ClientState.Objects.Types;
 namespace PartyFinderReborn.Services;
 
 /// <summary>
-/// Service for tracking action effects and forwarding relevant progress points to DutyProgressService
+/// Service for tracking action effects and forwarding relevant progress points to DutyProgressService.
+/// Now filters actions based on allowed progress points from DutyProgressService instead of boss/trash heuristics.
 /// </summary>
 public class ActionTrackingService : IDisposable
 {
@@ -36,7 +37,6 @@ public class ActionTrackingService : IDisposable
         
         Enable();
         
-        Svc.Log.Info("ActionTrackingService initialized");
     }
     
     public void Enable()
@@ -44,14 +44,12 @@ public class ActionTrackingService : IDisposable
         if (_configuration.EnableActionTracking)
         {
             ActionEffect.ActionEffectEvent += OnActionEffect;
-            Svc.Log.Debug("ActionEffect hook enabled");
         }
     }
     
     public void Disable()
     {
         ActionEffect.ActionEffectEvent -= OnActionEffect;
-        Svc.Log.Debug("ActionEffect hook disabled");
     }
 
     private void OnActionEffect(ActionEffectSet set)
@@ -69,12 +67,8 @@ public class ActionTrackingService : IDisposable
             if (sourceId == 0)
                 return;
 
-            // Check if source is player/party and should be filtered
+// Check if source is player/party and should be filtered
             if (ShouldFilterSource(sourceId))
-                return;
-
-            // Apply boss/trash mob filtering
-            if (!ShouldTrackSourceByType(sourceId))
                 return;
 
             // Get current territory and map to CFC ID
@@ -86,11 +80,18 @@ public class ActionTrackingService : IDisposable
                 // Get the proper action ID from the ActionEffectSet
                 var actionId = set.Action.Value.RowId;
                 
+                // Apply allowed progress points filtering - this replaces the old boss/trash heuristics
+                // Only track actions that are in the allowed set provided by DutyProgressService
+                var allowedProgPoints = _dutyProgressService.GetActiveAllowedProgPoints();
+                if (allowedProgPoints == null || !allowedProgPoints.Contains(actionId))
+                {
+                    return; // Silently skip non-allowed progression points
+                }
+                
                 // Avoid duplicates within single session
                 var key = (cfcId.Value, actionId);
                 if (_seenProgPoints.Contains(key))
                 {
-                    Svc.Log.Debug($"Already tracked action {actionId} for duty {cfcId.Value}, skipping");
                     return;
                 }
 
@@ -100,11 +101,9 @@ public class ActionTrackingService : IDisposable
                 // Add to DutyProgressService immediately
                 _ = Task.Run(async () => await _dutyProgressService.MarkProgPointSeenAsync(cfcId.Value, actionId));
                 
-                Svc.Log.Info($"🎯 NEW PROGRESS POINT: Action {actionId} ({set.Action.Value.Name}) tracked for duty {cfcId.Value} in territory {territoryType}");
             }
             else
             {
-                Svc.Log.Debug($"No CFC ID found for territory {territoryType}, ignoring action {set.Action.Value.RowId}");
             }
         }
         catch (Exception ex)
@@ -153,70 +152,6 @@ public class ActionTrackingService : IDisposable
         }
     }
     
-    private bool ShouldTrackSourceByType(uint sourceId)
-    {
-        try
-        {
-            var source = Svc.Objects.SearchById(sourceId) as IBattleNpc;
-            if (source == null)
-            {
-                // If both boss and trash tracking are disabled, don't track anything
-                if (!_configuration.TrackBossActionsOnly && !_configuration.TrackTrashMobs)
-                    return false;
-                
-                // If it's not a BattleNpc, assume it's acceptable if either option is enabled
-                return _configuration.TrackBossActionsOnly || _configuration.TrackTrashMobs;
-            }
-            
-            // Estimate if this is a boss or trash mob based on available properties
-            var isBoss = IsBossEnemy(source);
-            var isTrashMob = !isBoss; // Simplification: non-boss enemies are trash mobs
-            
-            // Apply configuration filters
-            if (_configuration.TrackBossActionsOnly && !isBoss)
-                return false;
-
-            if (!_configuration.TrackBossActionsOnly && _configuration.TrackTrashMobs && !isTrashMob)
-                return false;
-
-            // If TrackBossActionsOnly is false and TrackTrashMobs is false, track nothing
-            if (!_configuration.TrackBossActionsOnly && !_configuration.TrackTrashMobs)
-                return false;
-
-            return true;
-        }
-        catch (Exception ex)
-        {
-            Svc.Log.Warning($"Error checking source type for {sourceId}: {ex.Message}");
-            return true; // Default to tracking if we can't determine type
-        }
-    }
-    
-    private bool IsBossEnemy(IBattleNpc npc)
-    {
-        try
-        {
-            // Bosses typically have higher max HP
-            if (npc.MaxHp > 1000000) // 1M+ HP is likely a boss
-                return true;
-                
-            // Bosses often have special status effects or are marked as important
-            if (npc.StatusFlags.HasFlag(StatusFlags.Hostile) && npc.MaxHp > 100000)
-                return true;
-                
-            // Check if the name contains boss indicators (simplified heuristic)
-            var name = npc.Name.TextValue?.ToLowerInvariant() ?? "";
-            if (name.Contains("ultima") || name.Contains("primal") || name.Contains("savage") || 
-                name.Contains("extreme") || name.Contains("unreal"))
-                return true;
-                
-            return false;
-        }
-        catch
-        {
-            return false;
-        }
-    }
     
 
     
@@ -224,20 +159,24 @@ public class ActionTrackingService : IDisposable
     {
         try
         {
+            var prevCfcId = _contentFinderService.GetCfcIdByTerritory(_lastTerritoryType);
+            var currentCfcId = _contentFinderService.GetCfcIdByTerritory(territoryType);
+            
+            // Load allowed progression points when entering a duty
+            if (currentCfcId.HasValue)
+            {
+                _ = Task.Run(async () => await _dutyProgressService.LoadAndCacheAllowedProgPointsAsync(currentCfcId.Value));
+            }
+            
             // Check if we should reset the cache on instance leave
             if (_configuration.ResetOnInstanceLeave)
             {
-                // Determine if we're leaving an instance
-                var prevCfcId = _contentFinderService.GetCfcIdByTerritory(_lastTerritoryType);
-                var currentCfcId = _contentFinderService.GetCfcIdByTerritory(territoryType);
-                
                 // If we had a CFC before but don't now, we likely left an instance
                 if (prevCfcId.HasValue && !currentCfcId.HasValue)
                 {
                     var clearedCount = _seenProgPoints.Count;
                     _seenProgPoints.Clear();
                     _progPointTimestamps.Clear();
-                    Svc.Log.Debug($"Reset {clearedCount} tracked progress points on instance leave (territory {_lastTerritoryType} -> {territoryType})");
                 }
             }
             
@@ -257,7 +196,6 @@ public class ActionTrackingService : IDisposable
         var clearedCount = _seenProgPoints.Count;
         _seenProgPoints.Clear();
         _progPointTimestamps.Clear();
-        Svc.Log.Info($"Manually cleared {clearedCount} tracked progress points");
     }
     
     /// <summary>
@@ -283,6 +221,5 @@ public class ActionTrackingService : IDisposable
         _seenProgPoints.Clear();
         _progPointTimestamps.Clear();
         
-        Svc.Log.Info("ActionTrackingService disposed");
     }
 }

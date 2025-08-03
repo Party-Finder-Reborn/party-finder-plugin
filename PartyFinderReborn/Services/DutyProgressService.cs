@@ -23,9 +23,14 @@ public class DutyProgressService : IDisposable
     private readonly PartyFinderApiService _apiService;
     private readonly Configuration _configuration;
     
-    private readonly SemaphoreSlim _progPointsSemaphore = new(1, 1);
+private readonly SemaphoreSlim _progPointsSemaphore = new(1, 1);
     private readonly HashSet<uint> _completedDutiesMirror = new();
     private readonly Dictionary<uint, HashSet<uint>> _seenProgPointsMirror = new();
+    private readonly Dictionary<uint, HashSet<uint>> _allowedProgPointsCache = new();
+    private readonly Dictionary<uint, Dictionary<uint, string>> _progPointFriendlyNamesCache = new();
+    private uint _activeCfcId = 0;
+    private HashSet<uint>? _activeAllowedProgPoints = null;
+    private Dictionary<uint, string>? _activeProgPointFriendlyNames = null;
     
     public DutyProgressService(ContentFinderService contentFinderService, PartyFinderApiService apiService, Configuration configuration)
     {
@@ -49,10 +54,8 @@ public class DutyProgressService : IDisposable
             await RefreshLocalMirrorAsync();
             
             // Run initial sync from game state for redundancy and testing
-            Svc.Log.Info("Running initial duty sync from game state...");
             await SyncDutiesOnLoginAsync();
             
-            Svc.Log.Info("DutyProgressService initialized and initial sync completed.");
         }
         catch (Exception ex)
         {
@@ -72,12 +75,10 @@ public class DutyProgressService : IDisposable
             _completedDutiesMirror.Clear();
             _seenProgPointsMirror.Clear();
             
-            Svc.Log.Info("Cleared local mirrors. Repopulating from game state...");
             
             // Immediately repopulate the completed duties mirror from game state
             await PopulateCompletedDutiesFromGameAsync();
             
-            Svc.Log.Info($"Local mirror refresh completed. {_completedDutiesMirror.Count} completed duties loaded.");
         }
         catch (Exception ex)
         {
@@ -113,7 +114,6 @@ public class DutyProgressService : IDisposable
 
             if (completedDutiesFromGame.Count > 0)
             {
-                Svc.Log.Info($"Found {completedDutiesFromGame.Count} completed duties in game state. Syncing them individually.");
                 var successCount = 0;
                 
                 foreach (var dutyId in completedDutiesFromGame)
@@ -129,11 +129,9 @@ public class DutyProgressService : IDisposable
                     }
                 }
                 
-                Svc.Log.Info($"Successfully synced {successCount} new completed duties to the server.");
             }
             else
             {
-                Svc.Log.Info("No completed duties found in game state to sync.");
             }
         }
         catch (Exception ex)
@@ -153,7 +151,6 @@ public class DutyProgressService : IDisposable
         if (success)
         {
             _completedDutiesMirror.Add(dutyId);
-            Svc.Log.Info($"Marked duty {dutyId} as completed on server.");
         }
     }
 
@@ -176,13 +173,163 @@ public class DutyProgressService : IDisposable
                     _seenProgPointsMirror[dutyId] = new HashSet<uint>();
                 }
                 _seenProgPointsMirror[dutyId].Add(actionId);
-                Svc.Log.Info($"Marked prog point {actionId} for duty {dutyId} as seen on server.");
             }
         }
         finally
         {
             _progPointsSemaphore.Release();
         }
+    }
+
+    /// <summary>
+    /// Loads and caches allowed prog points for the active CFC.
+    /// </summary>
+    public async Task LoadAndCacheAllowedProgPointsAsync(uint cfcId)
+    {
+        if (_activeCfcId == cfcId && _activeAllowedProgPoints != null)
+        {
+            return; // Already loaded for this CFC
+        }
+
+        _activeCfcId = cfcId;
+
+        var progPointsData = await _apiService.GetProgPointsAsync(cfcId);
+        if (progPointsData != null)
+        {
+            var allowedPoints = new HashSet<uint>();
+            var friendlyNames = new Dictionary<uint, string>();
+            
+            // Parse the progression points data to extract action IDs and friendly names
+            foreach (var dict in progPointsData)
+            {
+                uint actionId = 0;
+                string friendlyName = string.Empty;
+                
+                // Extract action ID
+                if (dict.ContainsKey("action_id"))
+                {
+                    if (dict["action_id"] is long longValue)
+                    {
+                        actionId = (uint)longValue;
+                    }
+                    else if (dict["action_id"] is int intValue)
+                    {
+                        actionId = (uint)intValue;
+                    }
+                    else if (dict["action_id"] is uint uintValue)
+                    {
+                        actionId = uintValue;
+                    }
+                    // Try to parse as string if needed
+                    else if (dict["action_id"] is string strValue && uint.TryParse(strValue, out var parsedValue))
+                    {
+                        actionId = parsedValue;
+                    }
+                }
+                
+                // Extract friendly name
+                if (dict.ContainsKey("friendly_name") && dict["friendly_name"] is string friendlyNameValue)
+                {
+                    friendlyName = friendlyNameValue;
+                }
+                
+                // Add to collections if we have a valid action ID
+                if (actionId > 0)
+                {
+                    allowedPoints.Add(actionId);
+                    if (!string.IsNullOrWhiteSpace(friendlyName))
+                    {
+                        friendlyNames[actionId] = friendlyName;
+                    }
+                }
+            }
+            
+            _activeAllowedProgPoints = allowedPoints;
+            _activeProgPointFriendlyNames = friendlyNames;
+            _allowedProgPointsCache[cfcId] = _activeAllowedProgPoints;
+            _progPointFriendlyNamesCache[cfcId] = friendlyNames;
+            
+        }
+        else
+        {
+            _activeAllowedProgPoints = null;
+            _activeProgPointFriendlyNames = null;
+        }
+    }
+
+    /// <summary>
+    /// Provides the active allowed prog points.
+    /// </summary>
+    public HashSet<uint>? GetActiveAllowedProgPoints()
+    {
+        return _activeAllowedProgPoints;
+    }
+    
+    /// <summary>
+    /// Gets the active CFC ID.
+    /// </summary>
+    public uint GetActiveCfcId()
+    {
+        return _activeCfcId;
+    }
+    
+    /// <summary>
+    /// Gets the active progression point friendly names.
+    /// </summary>
+    public Dictionary<uint, string>? GetActiveProgPointFriendlyNames()
+    {
+        return _activeProgPointFriendlyNames;
+    }
+    
+    /// <summary>
+    /// Gets allowed progress points for a specific duty ID.
+    /// </summary>
+    public HashSet<uint>? GetAllowedProgPointsForDuty(uint cfcId)
+    {
+        if (_activeCfcId == cfcId && _activeAllowedProgPoints != null)
+        {
+            return _activeAllowedProgPoints;
+        }
+        
+        // Check if we have cached data for this duty
+        if (_allowedProgPointsCache.TryGetValue(cfcId, out var cachedPoints))
+        {
+            return cachedPoints;
+        }
+        
+        return null;
+    }
+    
+    /// <summary>
+    /// Gets the friendly name for a specific progress point action ID.
+    /// Returns the server-provided friendly name if available, otherwise falls back to ActionNameService.
+    /// </summary>
+    /// <param name="cfcId">The duty ID</param>
+    /// <param name="actionId">The action ID</param>
+    /// <returns>Friendly name for the progress point</returns>
+    public string GetProgPointFriendlyName(uint cfcId, uint actionId)
+    {
+        // First try to get the server-provided friendly name
+        if (_activeCfcId == cfcId && _activeProgPointFriendlyNames != null)
+        {
+            if (_activeProgPointFriendlyNames.TryGetValue(actionId, out var activeFriendlyName))
+            {
+                return activeFriendlyName;
+            }
+        }
+        
+        // Check cached friendly names for this duty
+        if (_progPointFriendlyNamesCache.TryGetValue(cfcId, out var cachedNames))
+        {
+            if (cachedNames.TryGetValue(actionId, out var cachedFriendlyName))
+            {
+                return cachedFriendlyName;
+            }
+        }
+        
+        // Fallback to ActionNameService if no server-provided name is available
+        // This maintains backward compatibility
+        return $"Action #{actionId}"; // Simplified fallback - we'll let the UI handle ActionNameService lookup
     }
 
     /// <summary>
@@ -263,7 +410,14 @@ public class DutyProgressService : IDisposable
     /// </summary>
     public bool HasSeenProgPoint(uint dutyId, uint actionId)
     {
-        return _seenProgPointsMirror.TryGetValue(dutyId, out var points) && points.Contains(actionId);
+        var hasEntry = _seenProgPointsMirror.TryGetValue(dutyId, out var points);
+        var result = hasEntry && points.Contains(actionId);
+        
+        if (hasEntry && points != null)
+        {
+        }
+        
+        return result;
     }
     
     /// <summary>
@@ -329,11 +483,9 @@ public class DutyProgressService : IDisposable
                 }
                 catch (Exception ex)
                 {
-                    Svc.Log.Warning($"Failed to check completion for duty {duty.Content.RowId}: {ex.Message}");
                 }
             }
 
-            Svc.Log.Info($"Populated local mirror with {completedDutiesFromGame.Count} completed duties from game state.");
         }
         catch (Exception ex)
         {
@@ -369,7 +521,6 @@ public class DutyProgressService : IDisposable
                 }
             }
             
-            Svc.Log.Debug($"Built achievement mapping with {mapping.Count} entries");
         }
         catch (Exception ex)
         {
@@ -407,7 +558,6 @@ public class DutyProgressService : IDisposable
                 }
             }
             
-            Svc.Log.Debug($"Built quest mapping with {mapping.Count} entries");
         }
         catch (Exception ex)
         {

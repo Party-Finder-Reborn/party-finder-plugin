@@ -853,12 +853,12 @@ public async Task<JoinResult?> JoinListingAsync(string id)
     }
 
     /// <summary>
-    /// Gets a list of completed progression points for a duty.
+    /// Gets a list of progression points with completion status for a duty.
     /// </summary>
-    public async Task<List<uint>?> GetCompletedProgPointsAsync(uint dutyId)
+    public async Task<List<ProgPointStatus>?> GetProgPointsStatusAsync(uint dutyId)
     {
-        var cacheKey = $"duty-{dutyId}-points";
-        if (_cache.TryGetValue(cacheKey, out var cachedValue) && cachedValue is List<uint> cachedResult)
+        var cacheKey = $"duty-{dutyId}-points-status";
+        if (_cache.TryGetValue(cacheKey, out var cachedValue) && cachedValue is List<ProgPointStatus> cachedResult)
         {
             return cachedResult;
         }
@@ -869,21 +869,30 @@ public async Task<JoinResult?> JoinListingAsync(string id)
             if (response.IsSuccessStatusCode)
             {
                 var json = await response.Content.ReadAsStringAsync();
-                var result = JsonConvert.DeserializeObject<Dictionary<string, List<uint>>>(json);
-                if (result != null && result.TryGetValue("points", out var points))
+                var result = JsonConvert.DeserializeObject<DutyPointsResponse>(json);
+                if (result?.Points != null)
                 {
-                    _cache.TryAdd(cacheKey, points);
-                    return points;
+                    _cache.TryAdd(cacheKey, result.Points);
+                    return result.Points;
                 }
             }
-            Svc.Log.Warning($"Failed to get completed progression points for {dutyId}: {response.StatusCode}");
+            Svc.Log.Warning($"Failed to get progression points status for {dutyId}: {response.StatusCode}");
             return null;
         }
         catch (Exception ex)
         {
-            Svc.Log.Error($"Error getting completed progression points for {dutyId}: {ex.Message}");
+            Svc.Log.Error($"Error getting progression points status for {dutyId}: {ex.Message}");
             return null;
         }
+    }
+    
+    /// <summary>
+    /// Gets a list of completed progression point action IDs for a duty.
+    /// </summary>
+    public async Task<List<uint>?> GetCompletedProgPointsAsync(uint dutyId)
+    {
+        var progPointsStatus = await GetProgPointsStatusAsync(dutyId);
+        return progPointsStatus?.Where(p => p.Completed).Select(p => p.ActionId).ToList();
     }
 
     /// <summary>
@@ -927,8 +936,10 @@ public async Task<JoinResult?> JoinListingAsync(string id)
                 // Clear related cache entries
                 var completedCacheKey = $"duty-{dutyId}-point-{actionId}-completed";
                 var pointsCacheKey = $"duty-{dutyId}-points";
+                var progPointsCacheKey = $"prog-points-{dutyId}";
                 _cache.TryRemove(completedCacheKey, out _);
                 _cache.TryRemove(pointsCacheKey, out _);
+                _cache.TryRemove(progPointsCacheKey, out _);
                 return true;
             }
             
@@ -939,6 +950,57 @@ public async Task<JoinResult?> JoinListingAsync(string id)
         {
             Svc.Log.Error($"Error marking progression point for duty {dutyId}, action {actionId} as completed: {ex.Message}");
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Gets progression points for a specific duty with caching per duty.
+    /// Results are cached for 5 minutes to reduce server load.
+    /// </summary>
+    /// <param name="cfcId">The duty/CFC ID to get progression points for</param>
+    /// <returns>List of progression point data or null if request fails</returns>
+    public async Task<List<Dictionary<string, object>>?> GetProgPointsAsync(uint cfcId)
+    {
+        var cacheKey = $"prog-points-{cfcId}";
+        
+        // Check cache first
+        if (_cache.TryGetValue(cacheKey, out var cachedValue) && cachedValue is List<Dictionary<string, object>> cachedResult)
+        {
+            return cachedResult;
+        }
+
+        try
+        {
+            var response = await _httpClient.GetAsync($"{Constants.ApiBaseUrl}{Constants.ProgressBase}/prog-points/{cfcId}/");
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadAsStringAsync();
+                var result = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(json);
+                
+                if (result != null)
+                {
+                    // Cache the result for 5 minutes
+                    _cache.TryAdd(cacheKey, result);
+                    
+                    // Set up cache expiration (remove after _cacheDuration)
+                    _ = Task.Run(async () =>
+                    {
+                        await Task.Delay(_cacheDuration);
+                        _cache.TryRemove(cacheKey, out _);
+                    });
+                    
+                    return result;
+                }
+            }
+            
+            Svc.Log.Warning($"Failed to get progression points for duty {cfcId}: {response.StatusCode}");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Svc.Log.Error($"Error getting progression points for duty {cfcId}: {ex.Message}");
+            return null;
         }
     }
 

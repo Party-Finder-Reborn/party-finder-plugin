@@ -38,6 +38,28 @@ namespace PartyFinderReborn.Windows
 
             // Fetch latest data on open to ensure view is up-to-date
             _ = RefreshListingAsync();
+            
+            // Load prog points for this duty to get friendly names and initialize progress tracking
+            if (listing.CfcId > 0)
+            {
+                _ = Task.Run(async () => 
+                {
+                    try
+                    {
+                        
+                        // Load allowed prog points first to get friendly names
+                        await DutyProgressService.LoadAndCacheAllowedProgPointsAsync(listing.CfcId);
+                        
+                        // Then load the user's completed prog points for this duty to populate the cache
+                        var completedPoints = await DutyProgressService.GetCompletedProgPointsAsync(listing.CfcId);
+                        
+                    }
+                    catch (Exception ex)
+                    {
+                        Svc.Log.Error($"Failed to load progression data for duty {listing.CfcId}: {ex.Message}");
+                    }
+                });
+            }
         }
 
 public override void Draw()
@@ -332,17 +354,22 @@ public override void Draw()
                 });
             }
 
-            if (!string.IsNullOrWhiteSpace(Listing.ProgPoint))
+            if (Listing.ProgPoint.Any())
             {
                 CollapsingGroup("Progression Point", () =>
                 {
-                    var progPoints = ParseProgPointFromString(Listing.ProgPoint);
+                    var progPoints = Listing.ProgPoint;
                     if (progPoints.Any())
                     {
-                        var progPointNames = progPoints.Select(id => ActionNameService.Get(id));
-                        ImGui.TextWrapped($"Required: {string.Join(", ", progPointNames)}");
-                        ImGui.Separator();
-                        DrawProgressionStatus(progPoints);
+                        // Use ProgPointDetails if available, otherwise fallback to action names
+                        var progPointNames = Listing.ProgPointDetails.Any() 
+                            ? Listing.ProgPointDetails.Select(p => p.FriendlyName)
+                            : progPoints.Select(id => 
+                            {
+                                var friendlyName = DutyProgressService.GetProgPointFriendlyName(Listing.CfcId, id);
+                                return friendlyName != $"Action #{id}" ? friendlyName : ActionNameService.Get(id);
+                            });
+                        DrawProgressionStatus(progPoints.ToList());
                     }
                 });
             }

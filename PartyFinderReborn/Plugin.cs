@@ -116,7 +116,6 @@ public sealed class Plugin : IDalamudPlugin
                 try
                 {
                     await ConfigWindow.ValidateApiKeyOnStartupAsync();
-                    Svc.Log.Info("API key validation completed on startup");
                 }
                 catch (Exception ex)
                 {
@@ -125,18 +124,15 @@ public sealed class Plugin : IDalamudPlugin
             });
         }
 
-        Svc.Log.Info("Party Finder Reborn initialized successfully!");
     }
 
     private void OnLogin()
     {
-        Svc.Log.Info("Player logged in, running initial sync of completed duties.");
         _ = Task.Run(async () =>
         {
             try
             {
                 await DutyProgressService.SyncDutiesOnLoginAsync();
-                Svc.Log.Info("Initial duty sync completed successfully.");
             }
             catch (Exception ex)
             {
@@ -202,13 +198,11 @@ public sealed class Plugin : IDalamudPlugin
     
     private void OnRefreshCommand(string command, string args)
     {
-        Svc.Log.Info("Manual refresh of duty progress data requested");
         _ = Task.Run(async () =>
         {
             try
             {
                 await DutyProgressService.RefreshProgressData();
-                Svc.Log.Info("Duty progress data refreshed successfully");
             }
             catch (Exception ex)
             {
@@ -231,21 +225,10 @@ public sealed class Plugin : IDalamudPlugin
             var totalProgPointsCount = DutyProgressService.GetTotalProgPointsCount();
             var sessionProgPointsCount = ActionTrackingService.GetSeenProgPointsCount();
             
-            Svc.Log.Info($"Duty Progress Debug Info:");
-            Svc.Log.Info($"- Completed duties: {completedCount}");
-            Svc.Log.Info($"- Duties with progress points: {progPointsDutiesCount}");
-            Svc.Log.Info($"- Total progress points tracked: {totalProgPointsCount}");
-            Svc.Log.Info($"- Session progress points tracked: {sessionProgPointsCount}");
-            Svc.Log.Info($"- Action tracking enabled: {Configuration.EnableActionTracking}");
-            Svc.Log.Info($"- Filter player actions: {Configuration.FilterPlayerActions}");
-            Svc.Log.Info($"- Filter party actions: {Configuration.FilterPartyActions}");
-            Svc.Log.Info($"- Reset on instance leave: {Configuration.ResetOnInstanceLeave}");
-            Svc.Log.Info($"- Use {RefreshCommandName} to refresh data from game");
             
             if (completedCount > 0)
             {
                 var completedDuties = DutyProgressService.GetCompletedDuties();
-                Svc.Log.Info($"- First few completed duty IDs: {string.Join(", ", completedDuties.Take(10))}");
             }
         }
         catch (Exception ex)
@@ -371,7 +354,6 @@ public sealed class Plugin : IDalamudPlugin
             }
         }, token);
         
-        Svc.Log.Info($"Started notification worker for listing {listingId}");
     }
 
     public void StopJoinNotificationWorker(string listingId)
@@ -383,7 +365,6 @@ public sealed class Plugin : IDalamudPlugin
             _notificationWorkers.Remove(listingId);
             _lastNotificationTimestamps.Remove(listingId);
             
-            Svc.Log.Info($"Stopped notification worker for listing {listingId}");
         }
     }
 
@@ -561,7 +542,6 @@ public sealed class Plugin : IDalamudPlugin
                 var dismissed = await ApiService.DismissInvitationAsync(notificationId);
                 if (dismissed)
                 {
-                    Svc.Log.Info($"Successfully dismissed notification {notificationId} from server");
                 }
                 else
                 {
@@ -607,7 +587,6 @@ public sealed class Plugin : IDalamudPlugin
     
     private void OnConfigurationUpdated()
     {
-        Svc.Log.Info("Configuration updated, refreshing authenticated data...");
         
         // Refresh all authentication-dependent data in the main window
         _ = Task.Run(async () =>
@@ -615,7 +594,6 @@ public sealed class Plugin : IDalamudPlugin
             try
             {
                 await MainWindow.RefreshAllAuthenticatedDataAsync();
-                Svc.Log.Info("Successfully refreshed all authenticated data after configuration update.");
             }
             catch (Exception ex)
             {
@@ -629,7 +607,6 @@ public sealed class Plugin : IDalamudPlugin
             try
             {
                 await DutyProgressService.RefreshProgressData();
-                Svc.Log.Info("Successfully refreshed duty progress data after configuration update.");
             }
             catch (Exception ex)
             {

@@ -28,9 +28,9 @@ public class Configuration : IPluginConfiguration
     public bool FilterPartyActions { get; set; } = true;
     public bool ResetOnInstanceLeave { get; set; } = true;
     
-    // Action Tracking Filters
-    public bool TrackBossActionsOnly { get; set; } = true;
-    public bool TrackTrashMobs { get; set; } = false;
+    // Progress Point Tracking Configuration
+    public bool EnableProgPointTracking { get; set; } = true;
+    
 
     public void Save()
     {

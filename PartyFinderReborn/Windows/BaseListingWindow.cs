@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using System.Threading.Tasks;
+using Dalamud.Interface;
 using Dalamud.Interface.Windowing;
 using ECommons.DalamudServices;
 using ImGuiNET;
@@ -174,7 +175,6 @@ public abstract class BaseListingWindow : Window, IDisposable
                 return;
             }
             
-            Svc.Log.Info($"Refreshing party listing {Listing.Id}");
             
             var refreshedListing = await ApiService.GetListingAsync(Listing.Id);
             
@@ -183,7 +183,6 @@ public abstract class BaseListingWindow : Window, IDisposable
                 // Update the current listing with fresh data from server
                 Listing = refreshedListing;
 
-                Svc.Log.Info($"Successfully refreshed listing for duty #{Listing.CfcId} (ID: {Listing.Id}, CurrentSize: {Listing.CurrentSize})");
             }
             else
             {
@@ -221,11 +220,27 @@ public abstract class BaseListingWindow : Window, IDisposable
             
             if (isCompleted)
             {
-                ImGui.TextColored(Green, $"  ✓ #{dutyId} {dutyName} (Cleared)");
+                ImGui.Text("  ");
+                ImGui.SameLine();
+                ImGui.PushFont(UiBuilder.IconFont);
+                ImGui.PushStyleColor(ImGuiCol.Text, Green);
+                ImGui.TextUnformatted(FontAwesomeIcon.Check.ToIconString());
+                ImGui.PopStyleColor();
+                ImGui.PopFont();
+                ImGui.SameLine();
+                ImGui.TextColored(Green, $" #{dutyId} {dutyName} (Cleared)");
             }
             else
             {
-                ImGui.TextColored(Orange, $"  ✗ #{dutyId} {dutyName} (Not Cleared)");
+                ImGui.Text("  ");
+                ImGui.SameLine();
+                ImGui.PushFont(UiBuilder.IconFont);
+                ImGui.PushStyleColor(ImGuiCol.Text, Orange);
+                ImGui.TextUnformatted(FontAwesomeIcon.Times.ToIconString());
+                ImGui.PopStyleColor();
+                ImGui.PopFont();
+                ImGui.SameLine();
+                ImGui.TextColored(Orange, $" #{dutyId} {dutyName} (Not Cleared)");
             }
         }
         
@@ -234,25 +249,47 @@ public abstract class BaseListingWindow : Window, IDisposable
     
     protected void DrawProgressionStatus(List<uint> requiredProgPoints)
     {
-        ImGui.Indent();
-        ImGui.Text("Your Progress:");
-        
         foreach (var actionId in requiredProgPoints)
         {
-            var actionName = ActionNameService.Get(actionId);
+            // Use server-provided friendly name first, fallback to ActionNameService
+            var actionName = DutyProgressService.GetProgPointFriendlyName(Listing.CfcId, actionId);
+            
+            // Check if we got a server-provided friendly name or need to use ActionNameService
+            var isServerFriendlyName = !actionName.StartsWith("Action #");
+            if (!isServerFriendlyName)
+            {
+                actionName = ActionNameService.Get(actionId);
+            }
+            
             var hasSeen = DutyProgressService.HasSeenProgPoint(Listing.CfcId, actionId);
             
+            // If not seen locally, try async check to update cache for next time
+            if (!hasSeen)
+            {
+                _ = Task.Run(async () => await DutyProgressService.IsProgPointSeenAsync(Listing.CfcId, actionId));
+            }
+            
+            // Display the icon and text on the same line
+            ImGui.PushFont(UiBuilder.IconFont);
             if (hasSeen)
             {
-                ImGui.TextColored(Green, $"  ✓ {actionName} (Seen)");
+                ImGui.PushStyleColor(ImGuiCol.Text, Green);
+                ImGui.TextUnformatted(FontAwesomeIcon.Check.ToIconString());
+                ImGui.PopStyleColor();
+                ImGui.PopFont();
+                ImGui.SameLine();
+                ImGui.TextColored(Green, $" {actionName} (Clear)");
             }
             else
             {
-                ImGui.TextColored(Orange, $"  ✗ {actionName} (Not Seen)");
+                ImGui.PushStyleColor(ImGuiCol.Text, Orange);
+                ImGui.TextUnformatted(FontAwesomeIcon.Times.ToIconString());
+                ImGui.PopStyleColor();
+                ImGui.PopFont();
+                ImGui.SameLine();
+                ImGui.TextColored(Orange, $" {actionName} (Not Clear)");
             }
         }
-        
-        ImGui.Unindent();
     }
     
     protected void DrawRoster(PartyListing listing)
@@ -418,48 +455,64 @@ public abstract class BaseListingWindow : Window, IDisposable
         }
     }
     
-    protected List<uint> ParseProgPointFromString(string progPointStr)
+    protected List<uint> ParseProgPointFromStringUsingServerData(string progPointStr, uint cfcId)
     {
         var progPoints = new List<uint>();
         if (string.IsNullOrWhiteSpace(progPointStr))
             return progPoints;
         
+        Svc.Log.Debug($"Parsing progression point string: '{progPointStr}' for duty {cfcId}");
+        
+        // Get the cached friendly names for this duty
+        var activeFriendlyNames = DutyProgressService.GetActiveCfcId() == cfcId ? 
+            DutyProgressService.GetActiveProgPointFriendlyNames() : null;
+            
+        if (activeFriendlyNames == null)
+        {
+            Svc.Log.Warning($"No friendly names loaded for duty {cfcId}. Attempting to load from server...");
+            
+            // Try to load progression points from server as fallback
+            _ = Task.Run(async () => await DutyProgressService.LoadAndCacheAllowedProgPointsAsync(cfcId));
+            
+            return progPoints;
+        }
+        
+        // Log available friendly names for debugging
+        Svc.Log.Debug($"Available friendly names for duty {cfcId}: [{string.Join(", ", activeFriendlyNames.Select(kvp => $"{kvp.Key}='{kvp.Value}'"))}]");
+        
         var parts = progPointStr.Split(',', StringSplitOptions.RemoveEmptyEntries);
         foreach (var part in parts)
         {
             var trimmedPart = part.Trim();
+            Svc.Log.Debug($"Looking for friendly name match for: '{trimmedPart}'");
             
-            if (uint.TryParse(trimmedPart, out var actionId))
+            // Find action ID by matching friendly name (case-insensitive)
+            var matchingEntry = activeFriendlyNames.FirstOrDefault(kvp => 
+                string.Equals(kvp.Value, trimmedPart, StringComparison.OrdinalIgnoreCase));
+            
+            if (matchingEntry.Key != 0) // Found a match
             {
-                progPoints.Add(actionId);
-                continue;
+                Svc.Log.Debug($"Found match: '{trimmedPart}' -> action ID {matchingEntry.Key}");
+                progPoints.Add(matchingEntry.Key);
             }
-            
-            var digitsOnly = new string(trimmedPart.Where(char.IsDigit).ToArray());
-            if (!string.IsNullOrEmpty(digitsOnly) && uint.TryParse(digitsOnly, out var extractedId))
+            else
             {
-                progPoints.Add(extractedId);
-                continue;
-            }
-            
-            try
-            {
-                var matchingActions = ActionNameService.SearchByName(trimmedPart).ToList();
-                if (matchingActions.Count > 0)
+                Svc.Log.Warning($"No matching progression point for '{trimmedPart}' in server data for duty {cfcId}");
+                
+                // Try direct parsing as uint as fallback
+                if (uint.TryParse(trimmedPart, out var directId))
                 {
-                    progPoints.Add(matchingActions.First().id);
+                    Svc.Log.Debug($"Using direct ID fallback: {directId}");
+                    progPoints.Add(directId);
                 }
                 else
                 {
-                    Svc.Log.Debug($"Could not resolve progress point name '{trimmedPart}' to action ID");
+                    Svc.Log.Warning($"Could not parse '{trimmedPart}' as action ID either - skipping");
                 }
-            }
-            catch (Exception ex)
-            {
-                Svc.Log.Error($"Error resolving progress point name '{trimmedPart}': {ex.Message}");
             }
         }
         
+        Svc.Log.Debug($"Final parsed progression points: [{string.Join(", ", progPoints)}]");
         return progPoints;
     }
     
@@ -509,13 +562,9 @@ public abstract class BaseListingWindow : Window, IDisposable
         }
     }
     
-    protected string FormatProgPointsAsString(List<uint> progPoints)
+    protected List<uint> FormatProgPointsForJson(List<uint> progPoints)
     {
-        if (progPoints.Count == 0)
-            return string.Empty;
-        
-        var names = progPoints.Select(actionId => ActionNameService.Get(actionId));
-        return string.Join(", ", names);
+        return progPoints;
     }
 
     protected async Task<List<uint>> GetUserSeenProgPointsAsync(uint dutyId)
@@ -564,18 +613,23 @@ public abstract class BaseListingWindow : Window, IDisposable
         
         try
         {
-            var progPoints = DutyProgressService.GetSeenProgPoints(dutyId);
+            // Get allowed prog points for this duty from the server
+            var allowedProgPoints = DutyProgressService.GetActiveAllowedProgPoints();
+            
+            // Filter to only show allowed prog points for the current duty
+            var progPoints = new List<uint>();
+            if (allowedProgPoints != null)
+            {
+                progPoints = allowedProgPoints.ToList();
+            }
             
             _cachedProgPoints = progPoints;
             _cachedProgPointsDutyId = dutyId;
             
+            // If no active allowed prog points, try to get them from the API
             if (progPoints.Count == 0)
             {
-                var asyncProgPoints = await DutyProgressService.GetCompletedProgPointsAsync(dutyId);
-                if (asyncProgPoints != null && asyncProgPoints.Count > 0)
-                {
-                    _cachedProgPoints = asyncProgPoints;
-                }
+                _ = Task.Run(async () => await DutyProgressService.LoadAndCacheAllowedProgPointsAsync(dutyId));
             }
         }
         catch (Exception ex)

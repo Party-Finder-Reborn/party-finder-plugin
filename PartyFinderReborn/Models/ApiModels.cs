@@ -117,7 +117,10 @@ public class PartyListing
     public List<uint> RequiredClears { get; set; } = new();
     
     [JsonProperty("prog_point")]
-    public string ProgPoint { get; set; } = string.Empty;
+    public List<uint> ProgPoint { get; set; } = new();
+    
+    [JsonProperty("prog_point_details")]
+    public List<ProgPointDetail> ProgPointDetails { get; set; } = new();
     
     [JsonProperty("experience_level")]
     public string ExperienceLevel { get; set; } = string.Empty;
@@ -273,8 +276,16 @@ public class PartyListing
                 }
             }
             
-            if (!string.IsNullOrEmpty(ProgPoint))
-                requirements.Add($"Prog: {ProgPoint}");
+            if (ProgPointDetails.Count > 0)
+            {
+                var progNames = ProgPointDetails.Select(p => p.FriendlyName).ToList();
+                requirements.Add($"Prog: {string.Join(", ", progNames)}");
+            }
+            else if (ProgPoint.Count > 0)
+            {
+                // Fallback to action IDs if details are not available
+                requirements.Add($"Prog: {string.Join(", ", ProgPoint)}");
+            }
             
             if (ExperienceLevel != "fresh")
                 requirements.Add(ExperienceLevelDisplay);

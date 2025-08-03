@@ -263,34 +263,6 @@ public class ConfigWindow : Window, IDisposable
                     Configuration.Save();
                 }
                 
-                ImGui.Separator();
-                
-                // New Action Tracking Filters
-                ImGui.Text("Action Type Filters:");
-                
-                var trackBossActionsOnly = Configuration.TrackBossActionsOnly;
-                if (ImGui.Checkbox("Track Boss Actions Only", ref trackBossActionsOnly))
-                {
-                    Configuration.TrackBossActionsOnly = trackBossActionsOnly;
-                    Configuration.Save();
-                }
-                
-                if (ImGui.IsItemHovered())
-                {
-                    ImGui.SetTooltip("Only track actions from boss enemies (excludes trash mobs)");
-                }
-                
-                var trackTrashMobs = Configuration.TrackTrashMobs;
-                if (ImGui.Checkbox("Track Trash Mobs", ref trackTrashMobs))
-                {
-                    Configuration.TrackTrashMobs = trackTrashMobs;
-                    Configuration.Save();
-                }
-                
-                if (ImGui.IsItemHovered())
-                {
-                    ImGui.SetTooltip("Track actions from trash mobs (non-boss enemies)");
-                }
                 
                 ImGui.Unindent();
             }
