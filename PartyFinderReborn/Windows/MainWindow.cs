@@ -829,6 +829,17 @@ if (response != null)
         }
     }
 
+    /// <summary>
+    /// Filter newline characters and other problematic whitespace from text to prevent UI layout issues
+    /// </summary>
+    private static string FilterNewlines(string input)
+    {
+        if (string.IsNullOrEmpty(input))
+            return input;
+            
+        return input.Replace("\r\n", " ").Replace("\n", " ").Replace("\r", " ").Replace("\t", " ");
+    }
+    
     private void DrawListingsTable()
     {
         ImGui.Text($"Party Listings ({FilteredListings.Count} found)");
@@ -865,7 +876,7 @@ if (response != null)
                 // Description column
                 if (ImGui.TableNextColumn())
                 {
-var description = string.IsNullOrWhiteSpace(listing.Description) ? "No description" : listing.Description;
+                    var description = string.IsNullOrWhiteSpace(listing.Description) ? "No description" : FilterNewlines(listing.Description);
                     var maxLength = 50;
                     var displayText = description.Length > maxLength ? description.Substring(0, maxLength) + "..." : description;
 
@@ -897,7 +908,7 @@ var description = string.IsNullOrWhiteSpace(listing.Description) ? "No descripti
                 // Tags column
                 if (ImGui.TableNextColumn())
                 {
-                    var tagsDisplay = string.IsNullOrWhiteSpace(listing.TagsDisplay) ? "No tags" : listing.TagsDisplay;
+                    var tagsDisplay = string.IsNullOrWhiteSpace(listing.TagsDisplay) ? "No tags" : FilterNewlines(listing.TagsDisplay);
                     // Use dynamic text wrapping instead of manual truncation
                     ImGui.PushTextWrapPos(ImGui.GetCursorPos().X + ImGui.GetColumnWidth());
                     ImGui.TextWrapped(tagsDisplay);

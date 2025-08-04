@@ -5,6 +5,7 @@ using Dalamud.Interface.Windowing;
 using ImGuiNET;
 using PartyFinderReborn.Services;
 using Dalamud.Interface;
+using ECommons.DalamudServices;
 
 namespace PartyFinderReborn.Windows;
 
@@ -18,6 +19,7 @@ public class ConfigWindow : Window, IDisposable
     private bool _isValidatingApiKey = false;
     private bool? _apiKeyValid = null;
     private string _lastValidatedApiKey = string.Empty;
+    private bool _hasSyncedDutiesAfterValidation = false;
 
     public ConfigWindow(Plugin plugin) : base("Party Finder Reborn Configuration##config_window")
     {
@@ -83,6 +85,24 @@ public class ConfigWindow : Window, IDisposable
         if (previousValidationState != true && _apiKeyValid == true)
         {
             _ = Plugin.MainWindow.RefreshAllAuthenticatedDataAsync();
+            
+            // Initialize and sync duties after successful API key validation if not yet synced
+            if (!_hasSyncedDutiesAfterValidation)
+            {
+                _hasSyncedDutiesAfterValidation = true;
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        // Initialize the DutyProgressService - this will do the force complete sync
+                        await Plugin.DutyProgressService.InitializeAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        Svc.Log.Error($"Failed to initialize DutyProgressService after API key validation: {ex.Message}");
+                    }
+                });
+            }
         }
     }
     
@@ -93,7 +113,8 @@ public class ConfigWindow : Window, IDisposable
     {
         if (string.IsNullOrEmpty(Configuration.ApiKey))
         {
-            // No feedback when API key is empty
+            // Draw invisible text to maintain layout when API key is empty
+            ImGui.TextUnformatted("");
             return;
         }
         
@@ -196,6 +217,7 @@ public class ConfigWindow : Window, IDisposable
                 // Reset validation state when API key changes
                 _apiKeyValid = null;
                 _lastValidatedApiKey = string.Empty;
+                _hasSyncedDutiesAfterValidation = false;
                 
                 // Trigger validation if key is not empty
                 if (!string.IsNullOrEmpty(apiKey))

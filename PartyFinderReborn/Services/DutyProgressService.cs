@@ -24,6 +24,7 @@ public class DutyProgressService : IDisposable
     private readonly Configuration _configuration;
     
     private readonly SemaphoreSlim _progPointsSemaphore = new(1, 1);
+    private readonly SemaphoreSlim _syncDutiesSemaphore = new(1, 1);
     private readonly HashSet<uint> _completedDutiesMirror = new(); // Stores CFC IDs
     private readonly Dictionary<uint, HashSet<uint>> _seenProgPointsMirror = new();
     private readonly Dictionary<uint, HashSet<uint>> _allowedProgPointsCache = new();
@@ -39,15 +40,20 @@ public class DutyProgressService : IDisposable
         _apiService = apiService;
         _configuration = configuration;
 
-        _ = Task.Run(InitializeAsync);
+        // Don't auto-initialize - let the plugin control when initialization happens
+        // This prevents API calls when there's no valid API key
     }
     
     public void Dispose()
     {
         _progPointsSemaphore?.Dispose();
+        _syncDutiesSemaphore?.Dispose();
     }
     
-    private async Task InitializeAsync()
+    /// <summary>
+    /// Initialize the service - should be called only when API key is validated
+    /// </summary>
+    public async Task InitializeAsync()
     {
         try
         {
@@ -147,20 +153,37 @@ public class DutyProgressService : IDisposable
             
             if (completedCfcIdsFromGame.Count > 0)
             {
-                var successCount = 0;
+                // Use bulk endpoint for better performance
+                var bulkSuccess = await _apiService.MarkDutiesCompletedBulkAsync(completedCfcIdsFromGame);
                 
-                // FORCE sync ALL completed duties, ignoring local mirror
-                foreach (var cfcId in completedCfcIdsFromGame)
+                if (bulkSuccess)
                 {
-                    var success = await _apiService.MarkDutyCompletedAsync(cfcId);
-                    if (success)
+                    // Update local mirror with all duties that were processed
+                    foreach (var cfcId in completedCfcIdsFromGame)
                     {
                         _completedDutiesMirror.Add(cfcId);
-                        successCount++;
                     }
+                    
+                    Svc.Log.Info($"[DutyProgressService] FORCED re-sync completed: {completedCfcIdsFromGame.Count} duties synced to server via bulk endpoint");
                 }
-                
-                Svc.Log.Info($"[DutyProgressService] FORCED re-sync completed: {successCount}/{completedCfcIdsFromGame.Count} duties synced to server");
+                else
+                {
+                    // Fallback to individual calls if bulk fails
+                    Svc.Log.Warning("[DutyProgressService] Bulk sync failed, falling back to individual calls");
+                    var successCount = 0;
+                    
+                    foreach (var cfcId in completedCfcIdsFromGame)
+                    {
+                        var success = await _apiService.MarkDutyCompletedAsync(cfcId);
+                        if (success)
+                        {
+                            _completedDutiesMirror.Add(cfcId);
+                            successCount++;
+                        }
+                    }
+                    
+                    Svc.Log.Info($"[DutyProgressService] FORCED re-sync fallback completed: {successCount}/{completedCfcIdsFromGame.Count} duties synced to server");
+                }
             }
         }
         catch (Exception ex)
@@ -171,12 +194,20 @@ public class DutyProgressService : IDisposable
     
     /// <summary>
     /// Synchronizes completed duties from the game to the server on login.
+    /// Uses a semaphore to prevent concurrent executions.
     /// </summary>
     public async Task SyncDutiesOnLoginAsync()
     {
+        // Guard against concurrent executions
+        if (!await _syncDutiesSemaphore.WaitAsync(100)) // 100ms timeout
+        {
+            Svc.Log.Info("[DutyProgressService] SyncDutiesOnLoginAsync already running, skipping");
+            return;
+        }
+        
         try
         {
-var allDuties = _contentFinderService.GetAllDuties();
+            var allDuties = _contentFinderService.GetAllDuties();
             var completedCfcIdsFromGame = new List<uint>();
 
             // Populate mapping from Content ID to CFC ID - check for both real and custom duties
@@ -231,17 +262,38 @@ var allDuties = _contentFinderService.GetAllDuties();
             {
                 var successCount = 0;
                 
-                foreach (var cfcId in completedCfcIdsFromGame)
-                {
-                    // Only sync if not already in our local mirror.
-                    if (_completedDutiesMirror.Contains(cfcId)) continue;
+                // Use bulk endpoint for better performance
+                var bulkSuccess = await _apiService.MarkDutiesCompletedBulkAsync(completedCfcIdsFromGame);
 
-                    var success = await _apiService.MarkDutyCompletedAsync(cfcId);
-                    if (success)
+                if (bulkSuccess)
+                {
+                    // Update local mirror with all duties that were processed
+                    foreach (var cfcId in completedCfcIdsFromGame)
                     {
                         _completedDutiesMirror.Add(cfcId);
-                        successCount++;
                     }
+
+                    Svc.Log.Info($"[DutyProgressService] Duties synced to server on login via bulk endpoint: {completedCfcIdsFromGame.Count} duties");
+                }
+                else
+                {
+                    // Fallback to individual calls if bulk fails
+                    Svc.Log.Warning("[DutyProgressService] Bulk sync on login failed, falling back to individual calls");
+
+                    foreach (var cfcId in completedCfcIdsFromGame)
+                    {
+                        // Only sync if not already in our local mirror.
+                        if (_completedDutiesMirror.Contains(cfcId)) continue;
+
+                        var success = await _apiService.MarkDutyCompletedAsync(cfcId);
+                        if (success)
+                        {
+                            _completedDutiesMirror.Add(cfcId);
+                            successCount++;
+                        }
+                    }
+
+                    Svc.Log.Info($"[DutyProgressService] Duties synced to server on login fallback: {successCount}/{completedCfcIdsFromGame.Count} duties");
                 }
                 
             }
@@ -253,6 +305,10 @@ var allDuties = _contentFinderService.GetAllDuties();
         {
             Svc.Log.Error($"An error occurred during duty synchronization: {ex.Message}");
         }
+        finally
+        {
+            _syncDutiesSemaphore.Release();
+        }
     }
     
     /// <summary>
@@ -260,12 +316,36 @@ var allDuties = _contentFinderService.GetAllDuties();
     /// </summary>
     public async Task MarkDutyCompletedAsync(uint dutyId)
     {
-        if (_completedDutiesMirror.Contains(dutyId)) return;
-
-        var success = await _apiService.MarkDutyCompletedAsync(dutyId);
-        if (success)
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        
+        try
         {
-            _completedDutiesMirror.Add(dutyId);
+            if (_completedDutiesMirror.Contains(dutyId))
+            {
+                Svc.Log.Debug($"[DutyProgressService] Duty {dutyId} already in local mirror, skipping");
+                return;
+            }
+
+            Svc.Log.Debug($"[DutyProgressService] Marking duty {dutyId} as completed");
+            
+            var success = await _apiService.MarkDutyCompletedAsync(dutyId);
+            
+            stopwatch.Stop();
+            
+            if (success)
+            {
+                _completedDutiesMirror.Add(dutyId);
+                Svc.Log.Info($"[DutyProgressService] Successfully marked duty {dutyId} as completed (elapsed: {stopwatch.ElapsedMilliseconds}ms)");
+            }
+            else
+            {
+                Svc.Log.Warning($"[DutyProgressService] Failed to mark duty {dutyId} as completed (elapsed: {stopwatch.ElapsedMilliseconds}ms)");
+            }
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            Svc.Log.Error($"[DutyProgressService] Exception marking duty {dutyId} as completed: {ex.Message} (elapsed: {stopwatch.ElapsedMilliseconds}ms)");
         }
     }
 
@@ -274,13 +354,23 @@ var allDuties = _contentFinderService.GetAllDuties();
     /// </summary>
     public async Task MarkProgPointSeenAsync(uint dutyId, uint actionId)
     {
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        
         await _progPointsSemaphore.WaitAsync();
         try
         {
             if (_seenProgPointsMirror.TryGetValue(dutyId, out var points) && points.Contains(actionId))
+            {
+                Svc.Log.Debug($"[DutyProgressService] Progress point duty_id={dutyId}, action_id={actionId} already in local mirror, skipping");
                 return;
+            }
 
+            Svc.Log.Debug($"[DutyProgressService] Marking progress point duty_id={dutyId}, action_id={actionId} as seen");
+            
             var success = await _apiService.MarkProgPointCompletedAsync(dutyId, actionId);
+            
+            stopwatch.Stop();
+            
             if (success)
             {
                 if (!_seenProgPointsMirror.ContainsKey(dutyId))
@@ -288,7 +378,18 @@ var allDuties = _contentFinderService.GetAllDuties();
                     _seenProgPointsMirror[dutyId] = new HashSet<uint>();
                 }
                 _seenProgPointsMirror[dutyId].Add(actionId);
+                
+                Svc.Log.Info($"[DutyProgressService] Successfully marked progress point duty_id={dutyId}, action_id={actionId} as seen (elapsed: {stopwatch.ElapsedMilliseconds}ms)");
             }
+            else
+            {
+                Svc.Log.Warning($"[DutyProgressService] Failed to mark progress point duty_id={dutyId}, action_id={actionId} as seen (elapsed: {stopwatch.ElapsedMilliseconds}ms)");
+            }
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            Svc.Log.Error($"[DutyProgressService] Exception marking progress point duty_id={dutyId}, action_id={actionId} as seen: {ex.Message} (elapsed: {stopwatch.ElapsedMilliseconds}ms)");
         }
         finally
         {

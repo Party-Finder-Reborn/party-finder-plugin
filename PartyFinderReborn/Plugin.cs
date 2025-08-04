@@ -109,8 +109,7 @@ public sealed class Plugin : IDalamudPlugin
             HelpMessage = "Opens the Party Finder Reborn configuration window"
         });
 
-        // Initialize duty progress tracking
-        _ = DutyProgressService.RefreshProgressData();
+        // Don't initialize duty progress tracking automatically - wait for API key validation
 
         // Hook into UI events
         pluginInterface.UiBuilder.Draw += DrawUI;
@@ -135,10 +134,11 @@ public sealed class Plugin : IDalamudPlugin
                 try
                 {
                     await ConfigWindow.ValidateApiKeyOnStartupAsync();
+                    // Duty initialization is now handled by ConfigWindow after validation
                 }
                 catch (Exception ex)
                 {
-                    Svc.Log.Warning($"Failed to validate API key on startup: {ex.Message}");
+                    Svc.Log.Warning($"Failed during API key validation on startup: {ex.Message}");
                 }
             });
         }
@@ -151,7 +151,15 @@ public sealed class Plugin : IDalamudPlugin
         {
             try
             {
-                await DutyProgressService.SyncDutiesOnLoginAsync();
+                // Only sync duties if API key is valid
+                if (ConfigWindow.ShouldAllowApiRequests)
+                {
+                    await DutyProgressService.SyncDutiesOnLoginAsync();
+                }
+                else
+                {
+                    Svc.Log.Debug("Skipping duty sync on login - API key validation required");
+                }
             }
             catch (Exception ex)
             {
@@ -682,12 +690,19 @@ public sealed class Plugin : IDalamudPlugin
             }
         });
         
-        // Also refresh duty progress data
+        // Also refresh duty progress data (only if API key is valid)
         _ = Task.Run(async () =>
         {
             try
             {
-                await DutyProgressService.RefreshProgressData();
+                if (ConfigWindow.ShouldAllowApiRequests)
+                {
+                    await DutyProgressService.RefreshProgressData();
+                }
+                else
+                {
+                    Svc.Log.Debug("Skipping duty progress data refresh - API key validation required");
+                }
             }
             catch (Exception ex)
             {

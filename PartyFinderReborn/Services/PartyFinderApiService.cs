@@ -279,7 +279,7 @@ public async Task<ApiResponse<PartyListing>?> GetListingsAsync(ListingFilters? f
     /// <summary>
     /// Get a specific listing by ID
     /// </summary>
-    public async Task<PartyListing?> GetListingAsync(string id)
+    public async Task<ListingRefreshResult> GetListingAsync(string id)
     {
         try
         {
@@ -288,15 +288,40 @@ public async Task<ApiResponse<PartyListing>?> GetListingsAsync(ListingFilters? f
             if (response.IsSuccessStatusCode)
             {
                 var json = await response.Content.ReadAsStringAsync();
-                return JsonConvert.DeserializeObject<PartyListing>(json);
+                var listing = JsonConvert.DeserializeObject<PartyListing>(json);
+                return new ListingRefreshResult
+                {
+                    Success = true,
+                    Listing = listing
+                };
             }
             
-            return null;
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                return new ListingRefreshResult
+                {
+                    Success = false,
+                    NotFound = true,
+                    ErrorMessage = "Listing no longer exists"
+                };
+            }
+            
+            return new ListingRefreshResult
+            {
+                Success = false,
+                NotFound = false,
+                ErrorMessage = $"Failed to get listing: {response.StatusCode}"
+            };
         }
         catch (Exception ex)
         {
             Svc.Log.Error($"Error getting listing {id}: {ex.Message}");
-            return null;
+            return new ListingRefreshResult
+            {
+                Success = false,
+                NotFound = false,
+                ErrorMessage = ex.Message
+            };
         }
     }
     
@@ -900,24 +925,33 @@ public async Task<JoinResult?> JoinListingAsync(string id)
     /// </summary>
     public async Task<bool> MarkDutyCompletedAsync(uint dutyId)
     {
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        
         try
         {
+            Svc.Log.Debug($"[DutyCompletion] Marking duty {dutyId} as completed");
+            
             var response = await _httpClient.PostAsync($"{Constants.ApiBaseUrl}{Constants.ProgressBase}/duty/{dutyId}/complete/", null);
+            
+            stopwatch.Stop();
             
             if (response.StatusCode == System.Net.HttpStatusCode.Created)
             {
                 // Clear related cache entries
                 var cacheKey = $"duty-{dutyId}-completed";
                 _cache.TryRemove(cacheKey, out _);
+                
+                Svc.Log.Info($"[DutyCompletion] Successfully marked duty {dutyId} as completed (elapsed: {stopwatch.ElapsedMilliseconds}ms)");
                 return true;
             }
             
-            Svc.Log.Warning($"Failed to mark duty {dutyId} as completed: {response.StatusCode}");
+            Svc.Log.Warning($"[DutyCompletion] Failed to mark duty {dutyId} as completed: {response.StatusCode} (elapsed: {stopwatch.ElapsedMilliseconds}ms)");
             return false;
         }
         catch (Exception ex)
         {
-            Svc.Log.Error($"Error marking duty {dutyId} as completed: {ex.Message}");
+            stopwatch.Stop();
+            Svc.Log.Error($"[DutyCompletion] Exception marking duty {dutyId} as completed: {ex.Message} (elapsed: {stopwatch.ElapsedMilliseconds}ms)");
             return false;
         }
     }
@@ -1001,6 +1035,173 @@ public async Task<JoinResult?> JoinListingAsync(string id)
         {
             Svc.Log.Error($"Error getting progression points for duty {cfcId}: {ex.Message}");
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Marks multiple duties as completed in a single bulk operation.
+    /// </summary>
+    /// <param name="dutyIds">Collection of duty IDs to mark as completed</param>
+    /// <returns>True if the bulk operation succeeded, false otherwise</returns>
+    public async Task<bool> MarkDutiesCompletedBulkAsync(IEnumerable<uint> dutyIds)
+    {
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        
+        try
+        {
+            // Return false immediately if list is empty
+            var dutyIdsList = dutyIds?.ToList();
+            if (dutyIdsList == null || dutyIdsList.Count == 0)
+            {
+                return false;
+            }
+
+            Svc.Log.Info($"[BulkDutyCompletion] Starting bulk operation for {dutyIdsList.Count} duties");
+
+            // Serialize body: { "duty_ids": dutyIds }
+            var requestBody = new { duty_ids = dutyIdsList };
+            var json = JsonConvert.SerializeObject(requestBody);
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            
+            // POST to Constants.ApiBaseUrl + Constants.ProgressBase + "/duties/complete/"
+            var response = await _httpClient.PostAsync($"{Constants.ApiBaseUrl}{Constants.ProgressBase}/duties/complete/", content);
+            
+            stopwatch.Stop();
+            
+            // Success == HttpStatusCode.Created
+            if (response.StatusCode == System.Net.HttpStatusCode.Created)
+            {
+                // On success, invalidate _cache keys: duty-{id}-completed, duty-{id}-points-status for each id
+                foreach (var dutyId in dutyIdsList)
+                {
+                    var completedCacheKey = $"duty-{dutyId}-completed";
+                    var pointsStatusCacheKey = $"duty-{dutyId}-points-status";
+                    _cache.TryRemove(completedCacheKey, out _);
+                    _cache.TryRemove(pointsStatusCacheKey, out _);
+                }
+                
+                // Log created/existing counts (parse JSON response)
+                try
+                {
+                    var responseJson = await response.Content.ReadAsStringAsync();
+                    var responseData = JsonConvert.DeserializeObject<Dictionary<string, object>>(responseJson);
+                    
+                    if (responseData != null)
+                    {
+                        var createdCount = responseData.TryGetValue("created", out var created) ? created : 0;
+                        var existingCount = responseData.TryGetValue("existing", out var existing) ? existing : 0;
+                        
+                        Svc.Log.Info($"[BulkDutyCompletion] Success: {createdCount} created, {existingCount} existing (elapsed: {stopwatch.ElapsedMilliseconds}ms)");
+                    }
+                }
+                catch (Exception parseEx)
+                {
+                    Svc.Log.Warning($"[BulkDutyCompletion] Failed to parse bulk completion response: {parseEx.Message}");
+                }
+                
+                return true;
+            }
+            
+            // Handle 207 Multi-Status (partial failure)
+            if (response.StatusCode == (System.Net.HttpStatusCode)207)
+            {
+                Svc.Log.Warning($"[BulkDutyCompletion] Partial failure (207 Multi-Status) (elapsed: {stopwatch.ElapsedMilliseconds}ms)");
+                
+                try
+                {
+                    var responseJson = await response.Content.ReadAsStringAsync();
+                    var responseData = JsonConvert.DeserializeObject<Dictionary<string, object>>(responseJson);
+                    
+                    if (responseData != null)
+                    {
+                        var createdCount = responseData.TryGetValue("created", out var created) ? created : 0;
+                        var existingCount = responseData.TryGetValue("existing", out var existing) ? existing : 0;
+                        var message = responseData.TryGetValue("message", out var msg) ? msg.ToString() : "Partial success";
+                        
+                        Svc.Log.Info($"[BulkDutyCompletion] Partial success: {createdCount} created, {existingCount} existing - {message}");
+                        
+                        // Handle invalid IDs - retry individually or warn user
+                        if (responseData.TryGetValue("invalid_ids", out var invalidIdsObj) && invalidIdsObj != null)
+                        {
+                            try
+                            {
+                                var invalidIds = JsonConvert.DeserializeObject<List<uint>>(invalidIdsObj.ToString());
+                                if (invalidIds != null && invalidIds.Count > 0)
+                                {
+                                    Svc.Log.Warning($"[BulkDutyCompletion] Found {invalidIds.Count} invalid duty IDs: [{string.Join(", ", invalidIds)}]");
+                                    
+                                    // Strategy: Warn user about invalid IDs instead of retrying since they're invalid
+                                    // In a real application, you might want to filter these out beforehand
+                                    await HandleInvalidDutyIdsAsync(invalidIds);
+                                }
+                            }
+                            catch (Exception invalidEx)
+                            {
+                                Svc.Log.Error($"[BulkDutyCompletion] Failed to parse invalid_ids: {invalidEx.Message}");
+                            }
+                        }
+                        
+                        // Clear cache for successfully processed IDs
+                        var validIds = dutyIdsList.Where(id => !responseData.ContainsKey("invalid_ids") || 
+                            !JsonConvert.DeserializeObject<List<uint>>(responseData["invalid_ids"].ToString()).Contains(id)).ToList();
+                        
+                        foreach (var dutyId in validIds)
+                        {
+                            var completedCacheKey = $"duty-{dutyId}-completed";
+                            var pointsStatusCacheKey = $"duty-{dutyId}-points-status";
+                            _cache.TryRemove(completedCacheKey, out _);
+                            _cache.TryRemove(pointsStatusCacheKey, out _);
+                        }
+                    }
+                    
+                    return true; // Partial success is still considered success
+                }
+                catch (Exception parseEx)
+                {
+                    Svc.Log.Error($"[BulkDutyCompletion] Failed to parse 207 response: {parseEx.Message}");
+                    return false;
+                }
+            }
+            
+            Svc.Log.Warning($"[BulkDutyCompletion] Failed with status: {response.StatusCode} (elapsed: {stopwatch.ElapsedMilliseconds}ms)");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            Svc.Log.Error($"[BulkDutyCompletion] Exception occurred: {ex.Message} (elapsed: {stopwatch.ElapsedMilliseconds}ms)");
+            return false;
+        }
+    }
+    
+    /// <summary>
+    /// Handles invalid duty IDs by logging warnings or potentially implementing retry logic.
+    /// </summary>
+    /// <param name="invalidIds">List of invalid duty IDs</param>
+    private async Task HandleInvalidDutyIdsAsync(List<uint> invalidIds)
+    {
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        
+        try
+        {
+            Svc.Log.Warning($"[InvalidDutyHandler] Processing {invalidIds.Count} invalid duty IDs");
+            
+            // Strategy 1: Log and warn user about invalid IDs
+            foreach (var invalidId in invalidIds)
+            {
+                Svc.Log.Warning($"[InvalidDutyHandler] Invalid duty ID detected: {invalidId} (non-positive integer)");
+            }
+            
+            // Strategy 2: In the future, we could try to validate and retry with corrected IDs
+            // For now, we just log the issue since invalid IDs are likely data corruption or client bugs
+            
+            stopwatch.Stop();
+            Svc.Log.Info($"[InvalidDutyHandler] Completed processing invalid IDs (elapsed: {stopwatch.ElapsedMilliseconds}ms)");
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            Svc.Log.Error($"[InvalidDutyHandler] Exception occurred: {ex.Message} (elapsed: {stopwatch.ElapsedMilliseconds}ms)");
         }
     }
 

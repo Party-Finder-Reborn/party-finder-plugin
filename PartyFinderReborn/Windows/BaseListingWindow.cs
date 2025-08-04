@@ -175,19 +175,26 @@ public abstract class BaseListingWindow : Window, IDisposable
                 return;
             }
             
+            var refreshResult = await ApiService.GetListingAsync(Listing.Id);
             
-            var refreshedListing = await ApiService.GetListingAsync(Listing.Id);
-            
-            if (refreshedListing != null)
+            if (refreshResult.Success && refreshResult.Listing != null)
             {
                 // Update the current listing with fresh data from server
-                Listing = refreshedListing;
-
+                Listing = refreshResult.Listing;
+            }
+            else if (refreshResult.NotFound)
+            {
+                // Listing no longer exists (404) - update status to indicate it's closed
+                Svc.Log.Warning($"Listing {Listing.Id} no longer exists on server - marking as closed");
+                Svc.Chat.Print($"[Party Finder Reborn] This listing has been closed and no longer exists");
+                
+                // Update the local listing status to reflect that it's closed
+                Listing.Status = "closed";
             }
             else
             {
-                Svc.Log.Warning($"Failed to refresh listing {Listing.Id} - listing may no longer exist");
-                Svc.Chat.PrintError($"[Party Finder Reborn] Failed to refresh listing - it may no longer exist");
+                Svc.Log.Warning($"Failed to refresh listing {Listing.Id}: {refreshResult.ErrorMessage}");
+                Svc.Chat.PrintError($"[Party Finder Reborn] Failed to refresh listing: {refreshResult.ErrorMessage ?? "Unknown error"}");
             }
         }
         catch (Exception ex)
@@ -667,6 +674,7 @@ public abstract class BaseListingWindow : Window, IDisposable
             {
                 Svc.Log.Info($"Successfully closed listing {Listing.Id}");
                 Svc.Chat.Print("[Party Finder Reborn] Your party listing has been closed.");
+                Plugin.StopJoinNotificationWorker(Listing.Id);
                 IsOpen = false;
             }
             else

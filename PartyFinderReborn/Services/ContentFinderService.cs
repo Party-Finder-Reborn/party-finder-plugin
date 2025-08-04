@@ -112,7 +112,12 @@ public class ContentFinderService : IDisposable
     /// </summary>
     public List<IDutyInfo> GetAllDuties()
     {
-        return _list ?? new List<IDutyInfo>();
+        if (_list == null)
+            return new List<IDutyInfo>();
+            
+        // Filter out duties with duplicate names, keeping only the first occurrence
+        var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        return _list.Where(duty => seenNames.Add(duty.NameText)).ToList();
     }
 
     // Legacy overload
@@ -130,8 +135,9 @@ public class ContentFinderService : IDisposable
             return GetAllDuties();
         
         var lowerSearch = searchTerm.ToLowerInvariant();
+        var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         return _list
-            .Where(d => d.NameText.ToLowerInvariant().Contains(lowerSearch))
+            .Where(d => d.NameText.ToLowerInvariant().Contains(lowerSearch) && seenNames.Add(d.NameText))
             .ToList();
     }
 
@@ -155,8 +161,9 @@ public class ContentFinderService : IDisposable
         if (_list == null)
             return new List<IDutyInfo>();
         
+        var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         return _list
-            .Where(d => string.Equals(GetContentTypeName(d), contentType, StringComparison.OrdinalIgnoreCase))
+            .Where(d => string.Equals(GetContentTypeName(d), contentType, StringComparison.OrdinalIgnoreCase) && seenNames.Add(d.NameText))
             .ToList();
     }
     
@@ -179,8 +186,9 @@ public class ContentFinderService : IDisposable
         if (_list == null)
             return new List<IDutyInfo>();
         
+        var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         return _list
-            .Where(d => d.HighEndDuty || GetContentTypeName(d).Contains("Savage") || GetContentTypeName(d).Contains("Ultimate"))
+            .Where(d => (d.HighEndDuty || GetContentTypeName(d).Contains("Savage") || GetContentTypeName(d).Contains("Ultimate")) && seenNames.Add(d.NameText))
             .ToList();
     }
     

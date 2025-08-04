@@ -212,11 +212,12 @@ public override void Draw()
         {
             return Listing.Status.ToLower() switch
             {
-"active" => ("Active", new Vector4(0.2f, 0.6f, 0.2f, 1.0f)),
+                "active" => ("Active", new Vector4(0.2f, 0.6f, 0.2f, 1.0f)),
                 "full" => ("Full", Red),
                 "draft" => ("Draft", ImGuiColors.DalamudGrey),
                 "completed" => ("Completed", ImGuiColors.ParsedGreen),
                 "cancelled" => ("Cancelled", ImGuiColors.DalamudRed),
+                "closed" => ("Closed", ImGuiColors.DalamudRed),
                 _ => (Listing.StatusDisplay, ImGuiColors.DalamudGrey)
             };
         }

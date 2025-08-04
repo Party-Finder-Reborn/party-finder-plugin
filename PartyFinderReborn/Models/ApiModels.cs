@@ -198,6 +198,7 @@ public class PartyListing
         "full" => "Full",
         "completed" => "Completed",
         "cancelled" => "Cancelled",
+        "closed" => "Closed",
         _ => Status
     };
     
@@ -471,6 +472,17 @@ public class ListingResult
     public string? ErrorMessage { get; set; }
     public bool ContentModerationFailed { get; set; }
     public string? ModerationReason { get; set; }
+}
+
+/// <summary>
+/// Result of refreshing/getting a listing that may no longer exist
+/// </summary>
+public class ListingRefreshResult
+{
+    public bool Success { get; set; }
+    public PartyListing? Listing { get; set; }
+    public bool NotFound { get; set; }
+    public string? ErrorMessage { get; set; }
 }
 
 /// <summary>
