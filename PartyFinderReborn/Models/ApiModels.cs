@@ -42,7 +42,8 @@ public class UserProfile
     [Obsolete("Use DutyProgressService.GetSeenProgPoints() instead")]
     public Dictionary<string, List<uint>> SeenProgPoints { get; set; } = new();
     
-    public string DisplayName => DiscordGlobalName ?? DiscordUsername ?? DiscordId;
+    [JsonProperty("display_name")]
+    public string DisplayName { get; set; } = string.Empty;
     
     /// <summary>
     /// DEPRECATED: Check if a duty has been completed. Use DutyProgressService.IsDutyCompleted() instead.
