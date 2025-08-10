@@ -10,7 +10,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using ImGuiNET;
+using Dalamud.Bindings.ImGui;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.UI.Info;
 using PartyFinderReborn.Models;
@@ -207,7 +207,7 @@ public sealed class Plugin : IDalamudPlugin
         // Remove all chat link handlers
         foreach (var commandId in _chatLinkHandlers.Keys)
         {
-            Svc.PluginInterface.RemoveChatLinkHandler(commandId);
+            Svc.Chat.RemoveChatLinkHandler(commandId);
         }
         _chatLinkHandlers.Clear();
 
@@ -468,7 +468,7 @@ public sealed class Plugin : IDalamudPlugin
         };
         
         // Register the handler and store it
-        var linkPayload = Svc.PluginInterface.AddChatLinkHandler(commandId, handler);
+        var linkPayload = Svc.Chat.AddChatLinkHandler(commandId, handler);
         _chatLinkHandlers[commandId] = handler;
 
         // Build the SeString message with clickable link
@@ -574,7 +574,7 @@ public sealed class Plugin : IDalamudPlugin
                     // Remove the chat link handler only on successful invite
                     if (commandId.HasValue && _chatLinkHandlers.ContainsKey(commandId.Value))
                     {
-                        Svc.PluginInterface.RemoveChatLinkHandler(commandId.Value);
+                        Svc.Chat.RemoveChatLinkHandler(commandId.Value);
                         _chatLinkHandlers.Remove(commandId.Value);
                     }
                     

@@ -4,8 +4,8 @@
             "InternalName": "PartyFinderReborn",
             "Description": "Connect with fellow Warriors of Light and find your perfect party composition with our modern, feature-rich party matching system.",
             "ApplicableVersion": "any",
-            "DalamudApiLevel": 12,
-            "TestingDalamudApiLevel": 12,
+            "DalamudApiLevel": 13,
+            "TestingDalamudApiLevel": 13,
             "Tags": [
                 "party",
                 "finder",

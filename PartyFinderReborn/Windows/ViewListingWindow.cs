@@ -9,7 +9,7 @@ using Dalamud.Interface.Components;
 using Dalamud.Interface.Windowing;
 using ECommons.DalamudServices;
 using ECommons.ImGuiMethods;
-using ImGuiNET;
+using Dalamud.Bindings.ImGui;
 using PartyFinderReborn.Models;
 using PartyFinderReborn.Services;
 using PartyFinderReborn.Utils;
@@ -260,7 +260,8 @@ public override void Draw()
                             // Rainbow effect for participants with pending invitations
                             var time = (float)ImGui.GetTime();
                             var hue = (time * 0.5f) % 1.0f; // Cycle through hues
-                            ImGui.ColorConvertHSVtoRGB(hue, 0.8f, 1.0f, out var r, out var g, out var b);
+                            float r = 0, g = 0, b = 0;
+                            ImGui.ColorConvertHSVtoRGB(hue, 0.8f, 1.0f, ref r, ref g, ref b);
                             var rainbowVec4 = new Vector4(r, g, b, 1.0f);
                             
                             ImGui.PushStyleColor(ImGuiCol.Text, rainbowVec4);
