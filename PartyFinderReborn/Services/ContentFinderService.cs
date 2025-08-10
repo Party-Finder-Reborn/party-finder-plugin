@@ -66,14 +66,17 @@ public class ContentFinderService : IDisposable
             var huntDuty = new CustomDutyInfo { RowId = 9999, NameText = "Hunt", ContentTypeId = 0, ClassJobLevelRequired = 1, ItemLevelRequired = 0 };
             var fateDuty = new CustomDutyInfo { RowId = 9998, NameText = "FATE", ContentTypeId = 0, ClassJobLevelRequired = 1, ItemLevelRequired = 0 };
             var rolePlayingDuty = new CustomDutyInfo { RowId = 9997, NameText = "Role Playing", ContentTypeId = 0, ClassJobLevelRequired = 1, ItemLevelRequired = 0 };
+            var duelDuty = new CustomDutyInfo { RowId = 9996, NameText = "Duel", ContentTypeId = 0, ClassJobLevelRequired = 1, ItemLevelRequired = 0 };
             
             _list.Add(huntDuty);
             _list.Add(fateDuty);
             _list.Add(rolePlayingDuty);
-            
+            _list.Add(duelDuty);
+
             _idLookup[9999] = huntDuty;
             _idLookup[9998] = fateDuty;
             _idLookup[9997] = rolePlayingDuty;
+            _idLookup[9996] = duelDuty;
 
             // Sort the list by NameText
             _list = _list.OrderBy(d => d.NameText).ToList();
