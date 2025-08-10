@@ -158,7 +158,7 @@ namespace PartyFinderReborn.Windows
             
 // Party Size Slider
             ImGui.Text("Party Size");
-            ImGui.SliderInt("##maxSize", ref _editMaxSize, 4, 48);
+            ImGui.SliderInt("##maxSize", ref _editMaxSize, 2, 48);
 
             // Description  
             ImGui.Text("Description *");
